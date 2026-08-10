@@ -116,7 +116,12 @@ export function createApp(assets: InertiaAssets) {
   });
 
   app.onError(async (err, c) => {
-    logError(c, err);
+    // Expected client errors (validation 422, HTTPException 4xx) are not
+    // server failures — don't pollute error-level logs with them.
+    const isClientError =
+      err instanceof ValidationFailed ||
+      (err instanceof HTTPException && err.status < 500);
+    if (!isClientError) logError(c, err);
     const pathname = safeUrl(c.req.url).pathname;
 
     if (err instanceof HTTPException) return err.getResponse();
