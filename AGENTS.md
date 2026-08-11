@@ -132,7 +132,9 @@ dist/                       # build output (gitignored), served by Workers Stati
    Reuse Tailwind tokens (bridged from CSS vars in `tailwind.css`) and
    existing components; don't reach for AI-default aesthetics (beige, ghost
    cards, purple gradients, italic serif accents). New components add
-   scoped `<style>` blocks per rule 7.
+   scoped `<style>` blocks per rule 7. Forms use `useForm` + `<form>` from
+   `@inertiajs/svelte` — see `.llm-wiki/wiki/concepts/concept-inertia-form-patterns.md`
+   for the decision rule and examples.
 
 ## Route conventions
 
