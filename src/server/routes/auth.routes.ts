@@ -87,8 +87,12 @@ export const authRoutes = () => {
 
   app.use(
     rateLimit({
-      max: 0,
-      windowSeconds: 0,
+      max: config.rateLimit.authMax,
+      windowSeconds: config.rateLimit.authWindow,
+      scope: "auth",
+      // This limiter lives on a sub-app mounted at "/" — without a path
+      // filter it would throttle every route (see rate-limit.ts).
+      paths: ["/login", "/register", "/forgot-password", "/reset-password", "/logout"],
     }),
   );
 
