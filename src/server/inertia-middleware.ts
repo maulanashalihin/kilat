@@ -18,6 +18,11 @@ import { Inertia, type InertiaAssets } from "./inertia";
 
 /** Context variables shared by every route/middleware. */
 export interface AppEnv {
+  Bindings: {
+    /** KV namespace for the rate limiter (see wrangler.toml). Optional at
+     *  the type level so tests/local runs without the binding fail open. */
+    RATE_LIMIT_KV?: KVNamespace;
+  };
   Variables: {
     user: User | null;
     flash: FlashData;

@@ -21,6 +21,10 @@ export interface EnvVars {
   MAILTRAP_INBOX_ID?: string;
   GOOGLE_CLIENT_ID?: string;
   GOOGLE_CLIENT_SECRET?: string;
+  RATE_LIMIT_GLOBAL_MAX?: string;
+  RATE_LIMIT_GLOBAL_WINDOW?: string;
+  RATE_LIMIT_AUTH_MAX?: string;
+  RATE_LIMIT_AUTH_WINDOW?: string;
 }
 
 const pick = <T>(value: T | undefined, fallback: T): T =>
@@ -41,6 +45,14 @@ export const config = {
   google: {
     clientId: null as string | null,
     clientSecret: null as string | null,
+  },
+  rateLimit: {
+    /** Baseline DDoS protection — all routes except /health, /assets, /.well-known. */
+    globalMax: 200,
+    globalWindow: 60,
+    /** Stricter layer on auth endpoints (brute-force protection). */
+    authMax: 30,
+    authWindow: 60,
   },
 };
 
@@ -86,5 +98,11 @@ export function initConfig(env: EnvVars): void {
   config.google = {
     clientId: googleClientId || null,
     clientSecret: googleClientSecret || null,
+  };
+  config.rateLimit = {
+    globalMax: Number(pick(env.RATE_LIMIT_GLOBAL_MAX, "200")),
+    globalWindow: Number(pick(env.RATE_LIMIT_GLOBAL_WINDOW, "60")),
+    authMax: Number(pick(env.RATE_LIMIT_AUTH_MAX, "30")),
+    authWindow: Number(pick(env.RATE_LIMIT_AUTH_WINDOW, "60")),
   };
 }
