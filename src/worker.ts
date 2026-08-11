@@ -14,6 +14,7 @@ import type { InertiaAssets } from "./server/inertia";
 export interface Env extends EnvVars {
   DB: D1Database;
   ASSETS: Fetcher;
+  RATE_LIMIT_KV: KVNamespace;
 }
 
 const assets = manifest as InertiaAssets;

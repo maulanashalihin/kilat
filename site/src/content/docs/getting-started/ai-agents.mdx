@@ -1,109 +1,235 @@
 ---
 title: Building with AI agents
-description: How Kilat is designed so AI agents can extend the codebase without inventing conventions.
+description: Build a Kilat app with an AI coding agent — write the story of your needs, let the agent do the technical work, review the result.
 ---
 
-Kilat is built for the next maintainer — and the next maintainer is often an
-AI agent writing the next feature. That's not an afterthought; it shapes the
-codebase. The goal: a codebase an agent can extend **without inventing
-conventions**, so it stays coherent as it evolves.
+Kilat was designed for AI agents. `AGENTS.md` at the repo root tells the
+agent where everything lives, so it can build features without guessing
+the conventions. Your job is not to write code or remember syntax — it's
+to describe what you need and review what the agent produces.
 
-## AGENTS.md codifies conventions
+<aside>
+**This workflow is opinionated.** It's what works for the Kilat author,
+not a universal law. Treat this page as a starting point and feel free
+to develop your own workflow. The conventions in `AGENTS.md` are the
+hard rules; everything on this page is a suggestion.
+</aside>
 
-[`AGENTS.md`](https://github.com/maulanashalihin/kilat/blob/main/AGENTS.md)
-is the file agents read before writing, moving, or restructuring code. It
-codifies the layout rules so new code stays structurally consistent — previous
-contributions broke the architecture by inventing their own layout, and this
-file exists to stop that.
+<aside>
+**Personally recommended: [omp.sh](https://omp.sh).** It reads
+`AGENTS.md` automatically, runs in your terminal, and can drive a real
+browser to verify UI changes. The workflow below works with omp.sh,
+Claude Code, Cursor, opencode, Windsurf, or any agent that can read
+files and run shell commands.
+</aside>
 
-The rules are hard, not advisory:
+## The workflow at a glance
 
-1. **Routes live in `src/server/routes/<feature>.routes.ts`**, handlers
-   inline, one file per URL. Never create a `routes.ts` inside a feature
-   folder.
-2. **`src/server/` is flat except `routes/`.** No feature subfolders. Extract
-   a module only when logic is reused across routes.
-3. **All SQL lives in `db.ts`** as async query functions via the D1 binding.
-   Schema changes are new numbered files in `migrations/`.
-4. **Env is read per-request via `initConfig(env)`** in `config.ts`. Never
-   read `process.env` elsewhere — Workers doesn't expose it.
-5. **Validation via TypeBox schemas** at the route level.
-6. **TypeScript**: `strict` + `noUncheckedIndexedAccess` +
-   `verbatimModuleSyntax`. Type-only imports use `import type`.
-7. **CSS is co-located**, not centralised — `styles.css` holds only global
-   base.
-
-## TypeBox validation with exact error shapes
-
-Validation uses [TypeBox](https://github.com/sinclairzx/typebox) schemas at the
-route level. When validation fails, `app.onError` maps `ValidationFailed` to
-422 Inertia page payloads with field-level errors:
-
-```ts
-// src/server/validation.ts
-import { TypeCompiler } from "@sinclair/typebox/compiler";
-
-export class ValidationFailed extends Error {
-  constructor(public errors: ValueError[]) { super("Validation failed"); }
-}
-
-export function validate<T>(schema: TSchema, value: unknown): T {
-  const result = TypeCompiler.Compile(schema).Check(value);
-  if (!result) {
-    const errors = [...TypeCompiler.Compile(schema).Errors(value)];
-    throw new ValidationFailed(errors);
-  }
-  return value as T;
-}
+```
+1. Install         bun create kilat@latest my-app — you do this first
+2. Plan            tell the story — the agent writes PLAN.md
+3. Design          all pages with dummy data — you review, until you love it
+4. Wire            backend + database — strict unit tests prove it works
+5. Loop            prompt → agent implements → tests pass → commit
+6. Ship            agent verifies everything is green
 ```
 
-The error shape is exact and documented — `{ field: message }` mapped back to
-the form component that owns the URL. An agent adding a route knows precisely
-what the error response looks like without reading the handler.
+## Setup: install first, then bring in the agent
 
-## Strict TypeScript
-
-`tsconfig.json` enables `strict`, `noUncheckedIndexedAccess`, and
-`verbatimModuleSyntax`. Mistakes fail at compile time:
-
-- No loose `any` — queries are parameterized and typed.
-- Array access returns `T | undefined` — agents can't forget null checks.
-- Type-only imports MUST use `import type` — or the build fails.
-
-Run `bun run typecheck` (`tsc --noEmit`) before finishing any change.
-
-## Deterministic tests
+The agent works inside an already-installed project — you scaffold and
+install before it ever starts:
 
 ```bash
-bun test --isolate   # or: bun run test
+bun create kilat@latest my-app
+cd my-app
+bun install
+bun run build        # required before the first dev run
+bun run dev          # http://localhost:8787
 ```
 
-The suite boots the Hono app and drives it through `app.request()`:
-registration/login/logout, guards and roles, password reset end to end,
-Inertia protocol (409/404/SSR), CSRF, `/health`.
+(Full walkthrough — templates, wrangler.toml, D1 setup — is in
+[Installation](/getting-started/installation/).)
 
-`--isolate` is required — each test file sets its env in `beforeAll` as if
-process-isolated. Without it, one file's teardown leaks into the next file's
-cached values. The tests are the safety net: an agent can change code and
-verify it didn't break the contract.
+Once the app runs, open the project in your agent (omp.sh, Claude Code,
+Cursor, opencode, Windsurf) and confirm it read the project rules:
 
-## The layout rules, summarized
+> What are the hard rules in AGENTS.md? Summarize them.
 
-| Concern | Where it lives |
-| --- | --- |
-| Routes | `src/server/routes/<feature>.routes.ts` |
-| SQL queries | `src/server/db.ts` (single file) |
-| Env / config | `src/server/config.ts` (`initConfig(env)`) |
-| Validation | TypeBox schemas at the route level |
-| CSS | Co-located `.css` next to the component/page |
-| Schema changes | `migrations/000N_*.sql` (never edit applied) |
+You should hear back the core conventions — routes live in
+`src/server/routes/<feature>.routes.ts`, SQL in `db.ts`, env in
+`config.ts`. If the agent can't answer, tell it to read `AGENTS.md`
+before proceeding. This is your first checkpoint.
 
-Given a URL, the file name follows from its first segment — `/login` →
-`routes/auth.routes.ts`, `/profile` → `routes/profile.routes.ts`. That's the
-discoverability contract: paste a broken URL and land in exactly one place.
+## Plan: tell the story — the agent writes PLAN.md
 
-## Next steps
+Describe what you need in plain language, like you're explaining to a
+friend. No structure, no technical detail — just the story:
 
-- [Conventions](/architecture/conventions/) — the full rule set in depth.
-- [Architecture overview](/architecture/overview/) — the `src/` layout.
-- [Adding a feature](/extending/adding-a-feature/) — step-by-step walkthrough.
+> I want a bookmark manager where users save links and organize them
+> with tags. Only logged-in users, no public pages. Write PLAN.md —
+> what it is, who uses it, what it does. Ask me if anything's unclear.
+
+The agent turns your story into a `PLAN.md` in the project root — the
+full plan: pages, data model, routes, validation, edge cases, and an
+implementation order. You never mention pages, routes, database tables,
+or code — the agent figures out all of that itself. It knows the
+conventions from `AGENTS.md`; your job is to describe the need, not the
+implementation.
+
+A real result looks something like this (abridged):
+
+```markdown
+# PLAN — Bookmark Manager
+
+> **Clarifying questions (non-blocking):** per-user or global tags?
+> Allow duplicate URLs? (Assumptions noted — you can veto them.)
+
+## What it is
+A private bookmark manager inside the app. Logged-in users save URLs
+with a title, note, and tags. No public pages, no sharing.
+
+## Pages
+- `/bookmarks` — paginated list + search + tag filter
+- `/bookmarks/new` — create form
+- `/bookmarks/:id/edit` — edit form (owner only)
+
+## Data model
+`migrations/0005_bookmarks.sql` — bookmarks, tags, bookmark_tags
+(user-scoped, FK cascade, indexes on user_id).
+
+## Routes & endpoints
+All in `src/server/routes/bookmarks.routes.ts`:
+- GET /bookmarks — requireAuth guard, Inertia render Bookmarks/Index
+- POST /bookmarks — TypeBox validation, tag normalization, flash + redirect
+- POST /bookmarks/:id/delete — ownership check → delete → orphan tag cleanup
+
+## Edge cases
+- Ownership enforced in handlers (foreign bookmarks get 404, not 403)
+- Tags trimmed / lowercased / deduplicated server-side
+- Empty state when a user has zero bookmarks
+
+## Acceptance criteria
+- [ ] Auth-only, strictly user-scoped (no cross-user access)
+- [ ] Search + tag filter combine correctly
+- [ ] `bun run typecheck` and `bun run test` pass
+
+## Implementation order
+1. Migration → 2. db.ts queries → 3. routes → 4. client pages → 5. tests
+```
+
+Real plans are longer — this is the shape. The agent lists the
+assumptions it made and asks questions wherever your story was
+ambiguous.
+
+### Include a design in your prompt
+
+If you have a visual design — a mockup from ChatGPT, a Figma export, a
+hand-drawn sketch — put it in the project and mention it in the same
+prompt. The design carries what words can't: colors, spacing, layout.
+Without one, the agent plans without it; it never invents a design
+reference on its own.
+
+Two ways to provide it:
+
+- **Image** (`design/mockup.png`) — the agent reads it and matches the
+  design. Requires the agent's model to support image input.
+- **HTML mockup** (`design/mockup.html`) — a single static page with
+  real markup and CSS, generated in ChatGPT or Gemini Canvas. Works even
+  when the agent can't read images, because the structure is in the
+  markup itself.
+
+Either way, reference it in your prompt:
+
+> I want a bookmark manager where users save links and organize them
+> with tags. Only logged-in users, no public pages. Design reference:
+> `design/bookmarks-mockup.html` — match its structure, spacing, and
+> colors. Write PLAN.md — what it is, who uses it, what it does. Ask me
+> if anything's unclear.
+
+The agent reflects the design in the plan — layout, components, pages —
+and builds against it.
+
+### Review the plan
+
+Read back what the agent wrote. Does it describe what you need? Would a
+non-technical friend understand it? If it reads like code, it's too
+technical — tell the agent to rewrite it in plain language. Check the
+assumptions it listed and veto anything wrong. Once it reads like a
+story, the agent can start building.
+
+## Design the pages (your review)
+
+Before touching the database, have the agent build **all the pages with
+dummy data**. Every page, every state — filled with fake content that
+looks real. Tell the agent:
+
+> Build all the pages from PLAN.md with dummy data — no backend, no
+> database. Use realistic sample content so I can judge the design.
+> Show me every page.
+
+Then judge the design on real pages instead of sketches:
+
+- Do the pages look like the mockup?
+- Do the empty, loading, and filled states all exist?
+- Is the flow between pages natural?
+
+Iterate until **you are personally satisfied with every single page** —
+this is the cheapest time to change things. There's no schema, no
+migration, no route logic to rework when you move a button or rename a
+field. Don't wire the backend until every page feels right to you.
+
+Design is the only thing that needs your judgment — it's subjective.
+There's no right or wrong layout, only one you like. So this phase is
+the only one where you review manually.
+
+## Wire the backend (automated tests)
+
+Only when the design is final, wire the pages to the backend:
+
+> The design is done. Now replace the dummy data with real data — add
+> the database schema, migrations, and routes so the pages read and
+> write for real.
+
+The wiring phase needs **no manual review** — unlike design, backend
+logic is objectively right or wrong, and that's exactly what automated
+verification is for. The agent writes strict unit tests for the wiring
+(schema, routes, validation, data flow) and runs them until they pass:
+
+> Make the unit tests strict — cover the schema, every route, and
+> validation. The wiring isn't done until the tests pass.
+
+Same pages, same design — the agent just swaps the dummy data for real
+queries, and the tests prove it works. Manual review for the subjective
+part (design), automated tests for the objective part (wiring).
+
+## Work in slices, then ship
+
+Build one slice at a time — not the whole app in one prompt:
+
+> Read PLAN.md and build the next slice. When it works, commit it.
+
+After each verified slice, the agent commits — a checkpoint you can
+roll back to. A plan with several slices produces several commits.
+
+When the slices are done, the agent verifies everything is green —
+typecheck, tests, browser console — and the app is ready to ship:
+
+> Run the full checks and confirm everything passes.
+
+## The plan evolves
+
+As you build, you'll realize the plan missed something — a field, a
+behavior, a page. Tell the agent what changed, and it updates `PLAN.md`:
+
+> Bookmarks should also show the domain. Update PLAN.md and continue
+> from where you left off.
+
+The plan stays the source of truth. When it changes, the agent follows
+the update.
+
+## What's next
+
+- [Adding a feature](/extending/adding-a-feature/) — what the agent
+  produces, step by step, if you want to understand its output.
+- [Conventions](/architecture/conventions/) — the rules in `AGENTS.md`.
+- [Testing](/testing/) — the test suite the agent runs.

@@ -151,6 +151,10 @@ npx wrangler d1 create kilat
 # → copy the database_id into wrangler.toml
 npx wrangler d1 migrations apply kilat --local
 
+# Create the KV namespace for the rate limiter
+npx wrangler kv namespace create RATE_LIMIT_KV
+# → copy the id into wrangler.toml ([[kv_namespaces]] binding)
+
 # Build client assets (required before first dev run)
 bun run build
 
@@ -217,6 +221,10 @@ values (API keys, OAuth secrets) should use `wrangler secret put` instead.
 | `MAILTRAP_API_TOKEN` | — | required when `MAIL_DRIVER=mailtrap` (set via `wrangler secret put`) |
 | `MAILTRAP_INBOX_ID` | — | use the sandbox endpoint when set |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | — | enable Google OAuth (set via `wrangler secret put`) |
+| `RATE_LIMIT_GLOBAL_MAX` | `200` | global requests per window (all routes except `/health`, `/assets`, `/.well-known`) |
+| `RATE_LIMIT_GLOBAL_WINDOW` | `60` | global window in seconds |
+| `RATE_LIMIT_AUTH_MAX` | `30` | auth requests per window (`/login`, `/register`, password reset) |
+| `RATE_LIMIT_AUTH_WINDOW` | `60` | auth window in seconds |
 
 Invalid/incomplete config fails fast with a clear message
 (`src/server/config.ts`).
