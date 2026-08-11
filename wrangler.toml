@@ -9,6 +9,22 @@ SSR = "true"
 MAIL_DRIVER = "log"
 MAIL_FROM = "no-reply@example.com"
 
+# --- Rate limiting (KV-backed, secure by default) ---------------------------
+# Create the namespace once per project, then paste its id below:
+#   npx wrangler kv namespace create RATE_LIMIT_KV
+# Local dev (wrangler dev --local) works with any placeholder id — Miniflare
+# simulates the namespace. Without the binding the limiter fails OPEN, so
+# keep this binding in your production wrangler.toml.
+[[kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "YOUR_KV_NAMESPACE_ID"
+
+# Optional tuning (defaults: global 200 req/60s, auth 30 req/60s):
+# RATE_LIMIT_GLOBAL_MAX = "200"
+# RATE_LIMIT_GLOBAL_WINDOW = "60"
+# RATE_LIMIT_AUTH_MAX = "30"
+# RATE_LIMIT_AUTH_WINDOW = "60"
+
 [[d1_databases]]
 binding = "DB"
 database_id = "YOUR_D1_DATABASE_ID"

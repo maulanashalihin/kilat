@@ -275,7 +275,6 @@ async function main() {
     ),
   );
 
-  // Patch wrangler.toml: rename Worker, reset D1 database_id, reset APP_URL.
   console.log("\x1b[36m✓\x1b[0m Configuring wrangler.toml...");
   await patchWrangler(targetDir, projectName);
 
@@ -300,15 +299,22 @@ async function main() {
     }
   }
 
+  // Auto-migrate local D1 so the app is ready to `bun run dev` immediately.
+  console.log("\x1b[36m✓\x1b[0m Applying D1 migrations (local)...");
+  try {
+    execSync("npx wrangler d1 migrations apply kilat --local", {
+      cwd: targetDir,
+      stdio: "inherit",
+    });
+  } catch {
+    console.log('\x1b[33m! Migration failed. Run "bun run db:migrate" manually.\x1b[0m');
+  }
+
   // Success message + next steps.
   clack.outro(`Kilat project created!  ${template.label}`);
 
   console.log();
   console.log("\x1b[1mNext steps:\x1b[0m");
-  if (!isCurrentDir) {
-    console.log(`  \x1b[36mcd\x1b[0m ${target}`);
-  }
-  console.log("  \x1b[36mbun\x1b[0m run db:migrate    \x1b[2m# create local D1 schema\x1b[0m");
   console.log("  \x1b[36mbun\x1b[0m run build         \x1b[2m# build client assets + SSR bundle\x1b[0m");
   console.log("  \x1b[36mbun\x1b[0m dev               \x1b[2m# start wrangler dev server\x1b[0m");
   console.log();

@@ -12,6 +12,7 @@ import { getCookie } from "hono/cookie";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { secureHeaders } from "hono/secure-headers";
+import { config } from "./config";
 import { rateLimit } from "./rate-limit";
 import { SESSION_COOKIE } from "./auth";
 import { pingDb } from "./db";
@@ -102,8 +103,15 @@ export function createApp(assets: InertiaAssets) {
     }),
   );
   app.use(inertiaMiddleware(assets));
-  // Rate limiter is a no-op stub for the CF experiment.
-  const globalLimiter = rateLimit({ max: 0, windowSeconds: 0 });
+  // Global rate limit (DDoS baseline) — applied to all routes except
+  // /health (orchestrator probes), /assets/* (bulk browser fetches), and
+  // /.well-known/* (DevTools probes). Auth endpoints get a stricter layer
+  // on top (see auth.routes.ts). KV-backed (see rate-limit.ts).
+  const globalLimiter = rateLimit({
+    max: config.rateLimit.globalMax,
+    windowSeconds: config.rateLimit.globalWindow,
+    scope: "global",
+  });
   const EXEMPT_PREFIXES = ["/assets/", "/.well-known/"] as const;
   app.use((c, next) => {
     const pathname = safeUrl(c.req.url).pathname;
