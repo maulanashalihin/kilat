@@ -77,7 +77,7 @@ function submitInfo() {
 }
 
 function submitPass() {
-	pass.value.post("/profile/password");
+	pass.value.post("/profile/password", { onSuccess: () => pass.value.reset() });
 }
 
 function initials(name: string): string {
