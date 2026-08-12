@@ -74,7 +74,7 @@
 
   function submitPass(e: SubmitEvent) {
     e.preventDefault()
-    pass.post('/profile/password')
+    pass.post('/profile/password', { onSuccess: () => pass.reset() })
   }
 
   const inputClass =
