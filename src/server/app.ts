@@ -3,10 +3,10 @@
  * Inertia middleware → routes → onError/notFound.
  *
  * Workers-specific changes:
- *  - No /uploads routes (upload feature skipped in CF experiment).
+ *  - Avatar uploads stream to R2 (AVATARS binding); served from /avatars/*.
  *  - No /assets/* handler (Workers Static Assets binding serves directly).
  *  - /health uses async pingDb (D1).
- *  - Rate limiter is a no-op stub (see rate-limit.ts).
+ *  - Rate limiter is KV-backed (see rate-limit.ts).
  */
 import { getCookie } from "hono/cookie";
 import { Hono } from "hono";
@@ -20,6 +20,7 @@ import { Inertia, type InertiaAssets } from "./inertia";
 import { inertiaMiddleware, type AppEnv } from "./inertia-middleware";
 import { logError, requestLogger } from "./logger";
 import { authRoutes, VALIDATION_MESSAGES } from "./routes/auth.routes";
+import { avatarRoutes } from "./routes/avatars.routes";
 import { googleOauthRoutes } from "./routes/google-oauth.routes";
 import { pageRoutes } from "./routes/pages.routes";
 import {
@@ -121,7 +122,7 @@ export function createApp(assets: InertiaAssets) {
     windowSeconds: config.rateLimit.globalWindow,
     scope: "global",
   });
-  const EXEMPT_PREFIXES = ["/assets/", "/.well-known/"] as const;
+  const EXEMPT_PREFIXES = ["/assets/", "/.well-known/", "/avatars/"] as const;
   app.use((c, next) => {
     const pathname = safeUrl(c.req.url).pathname;
     if (
@@ -166,6 +167,7 @@ export function createApp(assets: InertiaAssets) {
   app.get("/.well-known/*", () => new Response(null, { status: 404 }));
 
   app.route("/", authRoutes());
+  app.route("/", avatarRoutes());
   app.route("/", googleOauthRoutes());
   app.route("/", pageRoutes());
   app.route("/", profileRoutes());

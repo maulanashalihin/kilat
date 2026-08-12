@@ -35,8 +35,53 @@ database_id = "YOUR_D1_DATABASE_ID"
 database_name = "kilat"
 migrations_dir = "migrations"
 
+# --- R2 avatar storage -------------------------------------------------------
+# Create the bucket once per project:
+#   npx wrangler r2 bucket create kilat-avatars
+# Local dev (wrangler dev --local) simulates the binding via Miniflare.
+[[r2_buckets]]
+binding = "AVATARS"
+bucket_name = "kilat-avatars"
+
 [assets]
 directory = "./dist"
 binding = "ASSETS"
 not_found_handling = "none"
 run_worker_first = ["/*", "!/assets/*"]
+
+# --- Environments ------------------------------------------------------------
+# Deploy:  wrangler deploy --env staging    (or --env production)
+# Secrets: wrangler secret put RESEND_API_KEY --env production
+#
+# The base config above is the local-dev default. Each named environment
+# overrides only the fields that differ; bindings inherit the base names
+# but need their own remote IDs (create them per environment):
+#   npx wrangler kv namespace create RATE_LIMIT_KV --env production
+#   npx wrangler d1 create kilat-production
+#   npx wrangler r2 bucket create kilat-avatars-production
+
+[env.staging]
+name = "kilat-staging"
+
+[env.staging.vars]
+NODE_ENV = "production"
+SSR = "true"
+MAIL_DRIVER = "log"
+MAIL_FROM = "no-reply@staging.example.com"
+
+[env.staging.observability]
+enabled = true
+head_sampling_rate = 1
+
+[env.production]
+name = "kilat"
+
+[env.production.vars]
+NODE_ENV = "production"
+SSR = "true"
+MAIL_DRIVER = "resend"
+MAIL_FROM = "no-reply@example.com"
+
+[env.production.observability]
+enabled = true
+head_sampling_rate = 0.1
