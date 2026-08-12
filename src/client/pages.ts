@@ -14,6 +14,8 @@ import Profile from "./pages/Profile.svelte";
 import Register from "./pages/Register.svelte";
 import ResetPassword from "./pages/ResetPassword.svelte";
 
+// Pages receive Inertia page props of varying shapes — widen deliberately.
+// biome-ignore lint/suspicious/noExplicitAny: page props are heterogeneous
 type PageModule = { default: Component<any> };
 
 export const pages: Record<string, PageModule> = {

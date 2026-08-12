@@ -69,6 +69,7 @@ function sessionCookie(res: Response): string {
 	return cookie ? cookie.split(";")[0]! : "";
 }
 
+// biome-ignore lint/suspicious/noExplicitAny: Inertia page JSON shape varies per test
 async function page(res: Response): Promise<any> {
 	return res.json();
 }
