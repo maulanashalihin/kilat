@@ -1,0 +1,125 @@
+---
+title: Email verification
+description: Token-based email verification — hashed tokens, 24-hour expiry, and the registration flow that sends them.
+---
+
+When a user registers, Kilat sends a verification email with a unique link.
+Clicking the link marks the account as verified. The flow uses the same
+security pattern as password reset: raw token in the email, SHA-256 hash
+in the database.
+
+## Registration flow
+
+1. User submits the register form with name, email, and password.
+2. Server creates the user in D1 with `email_verified = 0`.
+3. Server generates a 256-bit random token, hashes it, stores the hash.
+4. Server emails the raw token as a verification link.
+5. User clicks the link → `GET /verify-email?token=...`.
+6. Server verifies the token, sets `email_verified = 1`, consumes the token.
+
+```ts
+// src/server/routes/auth.routes.ts
+const token = await createEmailVerification(user.id);
+const link = `${origin}/verify-email?token=${token}`;
+await sendMail({
+  to: body.email,
+  subject: "Verify your email",
+  text: `Welcome to Kilat!\n\nPlease verify your email address:\n${link}\n\nThis link expires in 24 hours.`,
+  html: `Welcome to Kilat! Verify your email: ${link} — expires in 24 hours.`,
+}).catch((err) => console.error("[mail] failed to send verification email:", err));
+```
+
+Email sending is **best-effort** — registration succeeds even if the email
+fails. The user can request a new link later.
+
+## Token creation
+
+```ts
+// src/server/auth.ts
+export const EMAIL_VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+export async function createEmailVerification(userId: number): Promise<string> {
+  const token = randomHex(32);                    // 256-bit random → email link
+  await deleteUserEmailVerifications(userId);     // invalidate prior tokens
+  await insertEmailVerification(
+    await hashToken(token),                       // SHA-256 hash → D1 only
+    userId,
+    new Date(Date.now() + EMAIL_VERIFICATION_TTL_MS).toISOString(),
+  );
+  return token;
+}
+```
+
+Key points:
+
+- **Raw token never touches D1** — only its SHA-256 hash is stored. A
+  database leak cannot expose valid verification links.
+- **One active token per user** — creating a new token deletes all prior
+  tokens for that user.
+- **24-hour expiry** — expired tokens are deleted on access.
+
+## Token verification
+
+```ts
+// src/server/routes/auth.routes.ts
+app.get("/verify-email", async (c) => {
+  const token = c.req.query("token") ?? "";
+  const userId = await verifyEmailToken(token);
+  if (!userId) {
+    return c.var.inertia.redirect("/login?notice=invalid_verification");
+  }
+  if (c.var.user && c.var.sessionToken) {
+    await setFlash(c.var.sessionToken, { success: "Email verified successfully." });
+    return c.var.inertia.redirect("/dashboard");
+  }
+  return c.var.inertia.redirect("/login?notice=email_verified");
+});
+```
+
+`verifyEmailToken` checks expiry, marks the user verified, and consumes the
+token (single-use):
+
+```ts
+export async function verifyEmailToken(token: string): Promise<number | null> {
+  const hashed = await hashToken(token);
+  const row = await findEmailVerification(hashed);
+  if (!row) return null;
+  if (Date.now() > new Date(row.expiresAt).getTime()) {
+    await deleteEmailVerification(hashed);
+    return null;
+  }
+  await verifyUserEmail(row.userId);              // SET email_verified = 1
+  await deleteUserEmailVerifications(row.userId); // consume all tokens
+  return row.userId;
+}
+```
+
+If the user is already logged in when they click the link, they're redirected
+to `/dashboard` with a flash message. If not logged in, they go to `/login`
+with a notice.
+
+## Security
+
+| Concern | Mitigation |
+| --- | --- |
+| Token leak via DB dump | Only SHA-256 hash stored — raw token never in D1 |
+| Token reuse | Single-use — consumed on verification, all tokens invalidated |
+| Token guessing | 256-bit random (`crypto.getRandomValues`) |
+| Token expiry | 24-hour TTL — expired tokens deleted on access |
+| Email enumeration | Registration always succeeds — email is best-effort |
+| Email flooding | Rate limiter on `/register` (30 req/60s) |
+
+## Shared pattern with password reset
+
+Email verification and password reset use the same token security pattern:
+
+| | Email verification | Password reset |
+| --- | --- | --- |
+| Token | 256-bit random hex | 256-bit random hex |
+| Stored as | SHA-256 hash in D1 | SHA-256 hash in D1 |
+| TTL | 24 hours | 1 hour |
+| Single-use | Yes | Yes |
+| Table | `email_verifications` | `password_resets` |
+
+See [Password reset](/auth/password-reset/) for the reset-specific flow, and
+[Mailer](/architecture/mailer/) for how emails are delivered.

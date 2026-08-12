@@ -1,0 +1,153 @@
+---
+title: Mailer
+description: Zero-dependency transactional email with swappable drivers — log, Resend, Mailtrap.
+---
+
+Kilat sends transactional emails — verification links and password reset
+links — via a zero-dependency mailer in `src/server/mailer.ts`. No SDK, no
+SMTP, just `fetch` to a REST API. Three drivers cover dev, staging, and
+production.
+
+## Drivers
+
+| Driver | Use case | Config required |
+| --- | --- | --- |
+| `log` | Dev + tests — prints to console, stores in `sentMails[]` | None |
+| `resend` | Production — [resend.com](https://resend.com) | `RESEND_API_KEY` |
+| `mailtrap` | Staging — [mailtrap.io](https://mailtrap.io) sandbox | `MAILTRAP_API_TOKEN` |
+
+### How it works
+
+```ts
+// src/server/mailer.ts (simplified)
+export async function sendMail(message: MailMessage): Promise<void> {
+  switch (config.mail.driver) {
+    case "log":
+      sentMails.push(message);
+      console.log(formatMail(message));
+      return;
+    case "resend":
+      await postJson("https://api.resend.com/emails", config.mail.resendApiKey, {
+        from: config.mail.from,
+        to: [message.to],
+        subject: message.subject,
+        text: message.text,
+        html: message.html ?? message.text,
+      });
+      return;
+    case "mailtrap":
+      await postJson(url, config.mail.mailtrapToken, { /* ... */ });
+      return;
+  }
+}
+```
+
+Each driver is a `case` branch — adding a new provider (SendGrid, Postmark,
+AWS SES) means adding one branch with the provider's API URL and payload
+shape. No abstraction layer, no adapter pattern, just a switch statement.
+
+### The log driver
+
+`MAIL_DRIVER = "log"` is the default. It prints a formatted box to the
+console and pushes the message into the `sentMails` array:
+
+```text
+┌─ mail (log driver) ────────────────────────────
+│ to:      user@example.com
+│ subject: Verify your email
+│ html: Welcome to Kilat! Verify your email. This link expires in 24 hours.
+└────────────────────────────────────────────────
+```
+
+Tests use `sentMails` to verify that emails were sent and extract tokens
+from the links — no SMTP server, no Mailtrap inbox, no network:
+
+```ts
+import { sentMails } from "../src/server/mailer";
+
+const resetMail = sentMails.find((m) => m.subject === "Reset your password");
+const token = resetMail?.html?.match(/token=([a-f0-9]+)/)?.[1];
+```
+
+## Configuration
+
+```toml
+# wrangler.toml [vars]
+MAIL_DRIVER = "log"              # log | resend | mailtrap
+MAIL_FROM = "no-reply@example.com"
+```
+
+Secrets (never in `wrangler.toml`):
+
+```sh
+wrangler secret put RESEND_API_KEY
+wrangler secret put MAILTRAP_API_TOKEN
+```
+
+For local dev, put them in `.dev.vars` (gitignored):
+
+```
+RESEND_API_KEY=re_xxxxx
+MAILTRAP_API_TOKEN=xxxxx
+```
+
+`config.ts` validates relationships at startup:
+
+- `MAIL_DRIVER=resend` requires `RESEND_API_KEY`
+- `MAIL_DRIVER=mailtrap` requires `MAILTRAP_API_TOKEN`
+- `MAILTRAP_INBOX_ID` is optional (uses the sandbox endpoint when set)
+
+## What gets sent
+
+| Event | Trigger | Subject |
+| --- | --- | --- |
+| Email verification | User registers | "Verify your email" |
+| Password reset | User submits `/forgot-password` | "Reset your password" |
+
+Both emails contain a link with a token. The token is a 256-bit random hex
+string — only its SHA-256 hash is stored in D1. See
+[Email verification](/auth/email-verification/) and
+[Password reset](/auth/password-reset/) for the full token flow.
+
+## Error handling
+
+Email sending is **best-effort** — a failed email doesn't block the user
+action. The `sendMail` call is wrapped in `.catch()`:
+
+```ts
+await sendMail({ /* ... */ }).catch((err) =>
+  console.error("[mail] failed to send verification email:", err),
+);
+```
+
+Registration succeeds even if the verification email fails. The user can
+request a new verification link later. This prevents email provider outages
+from breaking the signup flow.
+
+## Production setup with Resend
+
+[Resend](https://resend.com) is the recommended production driver — simple
+API, generous free tier (3,000 emails/month), and DKIM/SPF setup is
+automatic.
+
+1. Sign up at resend.com and get your API key.
+2. Set the secret: `wrangler secret put RESEND_API_KEY --env production`
+3. Set `MAIL_DRIVER = "resend"` in `[env.production.vars]`.
+4. Set `MAIL_FROM` to a verified domain (e.g. `no-reply@yourdomain.com`).
+
+```toml
+[env.production.vars]
+MAIL_DRIVER = "resend"
+MAIL_FROM = "no-reply@yourdomain.com"
+```
+
+## Adding a new driver
+
+1. Add the driver name to the `MailDriver` type in `config.ts`.
+2. Add a `case` branch in `sendMail()` with the provider's API URL and
+   payload shape.
+3. Add config fields (API key, etc.) to `config.mail` and `EnvVars`.
+4. Add validation in `initConfig()` if the driver requires a secret.
+5. Add the secret to `wrangler secret put`.
+
+No interface to implement, no class to extend — just a switch branch.
