@@ -30,6 +30,7 @@ export interface UserRow {
   role: Role;
   googleId: string | null;
   avatarUrl: string | null;
+  emailVerified: number;
   createdAt: string;
 }
 
@@ -67,6 +68,7 @@ export const toPublicUser = (row: UserRow): PublicUser => ({
   email: row.email,
   role: row.role,
   avatarUrl: row.avatarUrl,
+  emailVerified: row.emailVerified,
   createdAt: row.createdAt,
 });
 
@@ -111,7 +113,7 @@ export const createGoogleUser = (
 export const findUserByEmail = (email: string) =>
   d1
     .prepare(
-      "SELECT id, name, email, password_hash AS passwordHash, role, google_id AS googleId, avatar_url AS avatarUrl, created_at AS createdAt FROM users WHERE email = ?",
+      "SELECT id, name, email, password_hash AS passwordHash, role, google_id AS googleId, avatar_url AS avatarUrl, email_verified AS emailVerified, created_at AS createdAt FROM users WHERE email = ?",
     )
     .bind(email)
     .first<UserRow>();
@@ -119,7 +121,7 @@ export const findUserByEmail = (email: string) =>
 export const findUserById = (id: number) =>
   d1
     .prepare(
-      "SELECT id, name, email, password_hash AS passwordHash, role, google_id AS googleId, avatar_url AS avatarUrl, created_at AS createdAt FROM users WHERE id = ?",
+      "SELECT id, name, email, password_hash AS passwordHash, role, google_id AS googleId, avatar_url AS avatarUrl, email_verified AS emailVerified, created_at AS createdAt FROM users WHERE id = ?",
     )
     .bind(id)
     .first<UserRow>();
@@ -127,7 +129,7 @@ export const findUserById = (id: number) =>
 export const findUserByGoogleId = (googleId: string) =>
   d1
     .prepare(
-      "SELECT id, name, email, password_hash AS passwordHash, role, google_id AS googleId, avatar_url AS avatarUrl, created_at AS createdAt FROM users WHERE google_id = ?",
+      "SELECT id, name, email, password_hash AS passwordHash, role, google_id AS googleId, avatar_url AS avatarUrl, email_verified AS emailVerified, created_at AS createdAt FROM users WHERE google_id = ?",
     )
     .bind(googleId)
     .first<UserRow>();
@@ -163,7 +165,7 @@ export const listUsers = async (limit: number, offset: number) =>
   (
     await d1
       .prepare(
-        "SELECT id, name, email, password_hash AS passwordHash, role, google_id AS googleId, avatar_url AS avatarUrl, created_at AS createdAt FROM users ORDER BY id DESC LIMIT ? OFFSET ?",
+        "SELECT id, name, email, password_hash AS passwordHash, role, google_id AS googleId, avatar_url AS avatarUrl, email_verified AS emailVerified, created_at AS createdAt FROM users ORDER BY id DESC LIMIT ? OFFSET ?",
       )
       .bind(limit, offset)
       .all<UserRow>()
@@ -173,7 +175,7 @@ export const recentUsers = async (limit: number) =>
   (
     await d1
       .prepare(
-        "SELECT id, name, email, password_hash AS passwordHash, role, google_id AS googleId, avatar_url AS avatarUrl, created_at AS createdAt FROM users ORDER BY id DESC LIMIT ?",
+        "SELECT id, name, email, password_hash AS passwordHash, role, google_id AS googleId, avatar_url AS avatarUrl, email_verified AS emailVerified, created_at AS createdAt FROM users ORDER BY id DESC LIMIT ?",
       )
       .bind(limit)
       .all<UserRow>()
@@ -304,3 +306,51 @@ export const listExpired = async (now: string) =>
 /** Cheap liveness probe for the /health endpoint. */
 export const pingDb = () =>
   d1.prepare("SELECT 1 AS n").first<{ n: number }>();
+
+// ---------------------------------------------------------------------------
+// Email verification
+// ---------------------------------------------------------------------------
+
+export interface EmailVerificationRow {
+  tokenHash: string;
+  userId: number;
+  expiresAt: string;
+}
+
+export const insertEmailVerification = (
+  tokenHash: string,
+  userId: number,
+  expiresAt: string,
+) =>
+  d1
+    .prepare(
+      "INSERT INTO email_verifications (token_hash, user_id, expires_at) VALUES (?, ?, ?)",
+    )
+    .bind(tokenHash, userId, expiresAt)
+    .run();
+
+export const findEmailVerification = (tokenHash: string) =>
+  d1
+    .prepare(
+      "SELECT token_hash AS tokenHash, user_id AS userId, expires_at AS expiresAt FROM email_verifications WHERE token_hash = ?",
+    )
+    .bind(tokenHash)
+    .first<EmailVerificationRow>();
+
+export const deleteEmailVerification = (tokenHash: string) =>
+  d1
+    .prepare("DELETE FROM email_verifications WHERE token_hash = ?")
+    .bind(tokenHash)
+    .run();
+
+export const deleteUserEmailVerifications = (userId: number) =>
+  d1
+    .prepare("DELETE FROM email_verifications WHERE user_id = ?")
+    .bind(userId)
+    .run();
+
+export const verifyUserEmail = (userId: number) =>
+  d1
+    .prepare("UPDATE users SET email_verified = 1 WHERE id = ?")
+    .bind(userId)
+    .run();

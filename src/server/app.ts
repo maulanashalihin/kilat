@@ -69,6 +69,7 @@ function inertiaFromContext(
       user: null,
       flash: {},
       sessionToken,
+      cspNonce: c.get("cspNonce") ?? "",
     },
     assets,
   );
@@ -86,23 +87,31 @@ export function createApp(assets: InertiaAssets) {
       xFrameOptions: "DENY",
       referrerPolicy: "strict-origin-when-cross-origin",
       permissionsPolicy: { camera: [], microphone: [], geolocation: [] },
-      // script-src/style-src 'unsafe-inline': Inertia embeds the page
-      // payload as an inline <script type="application/json"> plus the
-      // theme-boot script, and the progress bar injects inline styles.
-      contentSecurityPolicy: {
-        defaultSrc: ["'self'"],
-        scriptSrc: ["'self'", "'unsafe-inline'"],
-        styleSrc: ["'self'", "'unsafe-inline'"],
-        imgSrc: ["'self'", "data:"],
-        fontSrc: ["'self'"],
-        connectSrc: ["'self'"],
-        frameAncestors: ["'none'"],
-        baseUri: ["'self'"],
-        formAction: ["'self'"],
-      },
+      // CSP is set per-request below (needs the per-request nonce from
+      // inertiaMiddleware) — not here, where it would be static.
     }),
   );
   app.use(inertiaMiddleware(assets));
+  // Per-request CSP with nonce — must run after inertiaMiddleware (which
+  // generates the nonce). Inline scripts (theme boot, page payload) and
+  // inline styles (Inertia progress bar) carry the nonce; 'unsafe-inline'
+  // is no longer needed.
+  app.use(async (c, next) => {
+    await next();
+    const nonce = c.get("cspNonce");
+    const csp = [
+      `default-src 'self'`,
+      `script-src 'self' 'nonce-${nonce}'`,
+      `style-src 'self' 'nonce-${nonce}'`,
+      `img-src 'self' data:`,
+      `font-src 'self'`,
+      `connect-src 'self'`,
+      `frame-ancestors 'none'`,
+      `base-uri 'self'`,
+      `form-action 'self'`,
+    ].join("; ");
+    c.res.headers.set("content-security-policy", csp);
+  });
   // Global rate limit (DDoS baseline) — applied to all routes except
   // /health (orchestrator probes), /assets/* (bulk browser fetches), and
   // /.well-known/* (DevTools probes). Auth endpoints get a stricter layer
