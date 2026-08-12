@@ -38,8 +38,8 @@ const res = await fetch("https://oauth2.googleapis.com/token", {
 
 `findOrCreateGoogleUser` links by Google ID first, then by email — an existing
 password-based account with the same email gets its `google_id` linked rather
-than duplicated. Avatar storage is skipped (no R2 binding); the external Google
-picture URL is stored directly.
+than duplicated. The external Google picture URL is stored directly (not
+uploaded to R2) — Google avatars are served from Google's CDN.
 
 ## Setup
 
