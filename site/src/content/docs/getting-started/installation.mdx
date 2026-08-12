@@ -27,7 +27,14 @@ The interactive prompt picks a **framework** (React 19 / Svelte 5 / Vue 3) and
 ```bash
 bun create kilat my-app --template svelte-tailwind   # skip prompts
 bun create kilat .                                    # use current dir
+bun create kilat my-app --remote --template default   # also create KV + R2
 ```
+
+The `--remote` flag creates the KV namespace and R2 bucket on your Cloudflare
+account and patches `wrangler.toml` with the real IDs — skip the manual step
+of creating bindings yourself. R2 will fail gracefully if not yet enabled on
+your account (enable it at
+[dash.cloudflare.com → R2](https://dash.cloudflare.com)).
 
 ## Manual clone
 
@@ -122,7 +129,9 @@ nearest edge automatically.
 | `bun run db:migrate` | Apply D1 migrations locally |
 | `bun run db:migrate:remote` | Apply D1 migrations to remote (production) |
 | `bun run db:seed` | Create a demo user (`[email] [password] [role]` args) |
+| `bun run db:seed:remote` | Create a demo user on remote D1 (`--remote` flag) |
 | `bun run typecheck` | `tsc --noEmit` |
+| `bun run lint` | `biome lint src tests scripts` |
 | `bun run test` | E2E suite (`bun test --isolate`) |
 
 ## Next steps
