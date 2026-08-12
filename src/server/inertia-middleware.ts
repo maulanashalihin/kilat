@@ -7,6 +7,10 @@
  * not-found/error handlers can rely on `c.var.inertia` being populated.
  *
  * All session/DB calls are async (D1).
+ *
+ * A per-request CSP nonce is generated here and passed to the Inertia
+ * adapter so inline scripts/styles can be nonce-tagged, allowing a
+ * strict CSP without 'unsafe-inline'.
  */
 import type { Next } from "hono";
 import type { Context } from "hono";
@@ -29,7 +33,15 @@ export interface AppEnv {
     sessionToken: string | null;
     inertia: Inertia;
     requestId: string;
+    /** Per-request CSP nonce (base64, 22 chars). */
+    cspNonce: string;
   };
+}
+
+/** Generate a base64 nonce from 16 random bytes (Web Crypto — Workers-safe). */
+function generateNonce(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(16));
+  return btoa(String.fromCharCode(...bytes));
 }
 
 export const inertiaMiddleware =
@@ -39,9 +51,11 @@ export const inertiaMiddleware =
     const row = await resolveUser(sessionToken);
     const user = row ? toPublicUser(row) : null;
     const flash = await readFlash(sessionToken);
+    const cspNonce = generateNonce();
     c.set("user", user);
     c.set("flash", flash);
     c.set("sessionToken", sessionToken);
+    c.set("cspNonce", cspNonce);
     c.set(
       "inertia",
       new Inertia(
@@ -51,9 +65,11 @@ export const inertiaMiddleware =
           user,
           flash,
           sessionToken,
+          cspNonce,
         },
         assets,
       ),
     );
     await next();
   };
+

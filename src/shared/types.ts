@@ -13,6 +13,8 @@ export interface User {
 	role: Role;
 	/** Relative path to the avatar image (served from /uploads), null when unset. */
 	avatarUrl: string | null;
+	/** 0 = not verified, 1 = verified. */
+	emailVerified: number;
 	createdAt: string;
 }
 
