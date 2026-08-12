@@ -35,6 +35,8 @@ export interface InertiaContext {
 	user: SharedPageProps["auth"]["user"];
 	flash: FlashData;
 	sessionToken: string | null;
+	/** Per-request CSP nonce for inline scripts/styles. */
+	cspNonce: string;
 }
 
 const splitList = (value: string | undefined): string[] | undefined =>
@@ -157,7 +159,7 @@ export class Inertia {
 	 */
 	private clientBody(page: Page): string {
 		const json = JSON.stringify(page).replace(/\//g, "\\/");
-		return `<script data-page="app" type="application/json">${json}</script><div id="app"></div>`;
+		return `<script data-page="app" type="application/json" nonce="${this.c.cspNonce}">${json}</script><div id="app"></div>`;
 	}
 
 	/** 422-style validation response, Inertia-aware. */
@@ -223,13 +225,14 @@ export class Inertia {
 		// Inline script: set data-theme + background-color on <html> before the
 		// external stylesheet loads, so the page paints dark immediately (no FOUC).
 		// Reads localStorage('theme'), falls back to prefers-color-scheme, defaults light.
-		const themeBoot = `<script>(function(){try{var t=localStorage.getItem('theme');if(t!=='light'&&t!=='dark'){t=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}var el=document.documentElement;el.setAttribute('data-theme',t);el.style.backgroundColor=t==='dark'?'#0f1117':'#f6f7fb';}catch(e){document.documentElement.setAttribute('data-theme','light');}})();</script>`;
+		const themeBoot = `<script nonce="${this.c.cspNonce}">(function(){try{var t=localStorage.getItem('theme');if(t!=='light'&&t!=='dark'){t=window.matchMedia('(prefers-color-scheme: dark)').matches?'dark':'light';}var el=document.documentElement;el.setAttribute('data-theme',t);el.style.backgroundColor=t==='dark'?'#0f1117':'#f6f7fb';}catch(e){document.documentElement.setAttribute('data-theme','light');}})();</script>`;
 		const doc = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <meta name="color-scheme" content="light dark" />
+<meta name="csp-nonce" content="${this.c.cspNonce}" />
 ${favicon}
 ${titleTag}
 ${headTags.join("\n")}

@@ -9,6 +9,7 @@ import { Hono } from "hono";
 import {
   clearPasswordResets,
   clearSessionCookie,
+  createEmailVerification,
   createPasswordReset,
   createSession,
   deleteSessionByToken,
@@ -17,6 +18,7 @@ import {
   requireAuth,
   setFlash,
   setSessionCookie,
+  verifyEmailToken,
   verifyPassword,
   verifyPasswordReset,
 } from "../auth";
@@ -62,12 +64,12 @@ type RegisterBody = Static<typeof registerBody>;
 type LoginBody = Static<typeof loginBody>;
 type ForgotPasswordBody = Static<typeof forgotPasswordBody>;
 type ResetPasswordBody = Static<typeof resetPasswordBody>;
-
-/** One-shot notice shown on the login page after redirects with ?notice=. */
 const LOGIN_NOTICES: Record<string, string> = {
   password_reset: "Your password has been reset. Please log in.",
   google_failed: "Google sign-in failed. Please try again.",
   logout: "You have been logged out.",
+  email_verified: "Your email has been verified. Please sign in.",
+  invalid_verification: "This verification link is invalid or has expired.",
 };
 
 /**
@@ -136,6 +138,17 @@ export const authRoutes = () => {
     if (c.var.sessionToken) await deleteSessionByToken(c.var.sessionToken);
     const session = await createSession(user.id);
     setSessionCookie(c, session.token, session.expiresAt);
+    // Send verification email (best-effort — don't block registration).
+    const token = await createEmailVerification(user.id);
+    const link = `${new URL(c.req.url).origin}/verify-email?token=${token}`;
+    await sendMail({
+      to: body.email,
+      subject: "Verify your email",
+      text: `Welcome to Kilat!\n\nPlease verify your email address:\n${link}\n\nThis link expires in 24 hours.`,
+      html: `<p>Welcome to Kilat!</p><p><a href="${link}">Verify your email</a></p><p>This link expires in 24 hours.</p>`,
+    }).catch((err) =>
+      console.error("[mail] failed to send verification email:", err),
+    );
     return page.redirect("/dashboard");
   });
 
@@ -201,6 +214,15 @@ export const authRoutes = () => {
     await updateUserPassword(passwordHash, user.id);
     await clearPasswordResets(user.email);
     return page.redirect("/login?notice=password_reset");
+  });
+  // GET /verify-email?token=... — verify email address, redirect to login.
+  app.get("/verify-email", async (c) => {
+    const token = c.req.query("token") ?? "";
+    const userId = await verifyEmailToken(token);
+    if (!userId) {
+      return c.var.inertia.redirect("/login?notice=invalid_verification");
+    }
+    return c.var.inertia.redirect("/login?notice=email_verified");
   });
 
   return app;
