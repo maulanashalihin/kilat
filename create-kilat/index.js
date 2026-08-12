@@ -168,21 +168,47 @@ async function createBindings(targetDir, projectName) {
   let content = await readFile(wranglerPath, "utf8");
 
   // KV namespace — required for rate limiting.
+  // Wrangler doesn't support --json for kv namespace create, so we parse
+  // the plain text output which contains: "id = <namespace_id>"
   try {
     const kvResult = execSync(
-      "npx wrangler kv namespace create RATE_LIMIT_KV --json",
-      { encoding: "utf8", cwd: targetDir },
+      "npx wrangler kv namespace create RATE_LIMIT_KV",
+      { encoding: "utf8", cwd: targetDir, stdio: ["pipe", "pipe", "pipe"] },
     );
-    const kvId = JSON.parse(kvResult)?.result?.id;
+    // Output contains: "id = <namespace_id>"
+    const idMatch = kvResult.match(/id\s*=\s*([a-f0-9]+)/i);
+    const kvId = idMatch?.[1];
     if (kvId) {
       content = content.replace(
         /^id = "YOUR_KV_NAMESPACE_ID"/m,
         `id = "${kvId}"`,
       );
       console.log(`\x1b[36m✓\x1b[0m Created KV namespace RATE_LIMIT_KV (${kvId})`);
+    } else {
+      throw new Error("Could not parse KV namespace ID");
     }
   } catch {
-    console.log('\x1b[33m! KV namespace creation failed. Run "npx wrangler kv namespace create RATE_LIMIT_KV" manually.\x1b[0m');
+    // Namespace may already exist — try listing to find the ID.
+    try {
+      const listResult = execSync(
+        "npx wrangler kv namespace list",
+        { encoding: "utf8", cwd: targetDir, stdio: ["pipe", "pipe", "pipe"] },
+      );
+      // List output is JSON array: [{"title":"RATE_LIMIT_KV","id":"..."}]
+      const namespaces = JSON.parse(listResult);
+      const existing = namespaces.find((ns) => ns.title === "RATE_LIMIT_KV");
+      if (existing?.id) {
+        content = content.replace(
+          /^id = "YOUR_KV_NAMESPACE_ID"/m,
+          `id = "${existing.id}"`,
+        );
+        console.log(`\x1b[36m✓\x1b[0m Using existing KV namespace RATE_LIMIT_KV (${existing.id})`);
+      } else {
+        console.log('\x1b[33m! KV namespace not found. Run "npx wrangler kv namespace create RATE_LIMIT_KV" manually.\x1b[0m');
+      }
+    } catch {
+      console.log('\x1b[33m! KV namespace creation failed. Run "npx wrangler kv namespace create RATE_LIMIT_KV" manually.\x1b[0m');
+    }
   }
 
   // R2 bucket — optional, fails gracefully if R2 not enabled on account.

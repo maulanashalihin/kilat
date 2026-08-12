@@ -1,6 +1,6 @@
 {
   "name": "create-kilat",
-  "version": "0.1.3",
+  "version": "0.2.0",
   "license": "MIT",
   "description": "Scaffold a new Kilat project — Cloudflare Workers + Hono + D1 + Inertia v3 boilerplate with template selection (React/Svelte/Vue, vanilla CSS/Tailwind).",
   "keywords": [
