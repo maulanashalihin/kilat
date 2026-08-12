@@ -1,8 +1,10 @@
 /**
  * Profile routes at /profile — page render, profile info and password changes.
  *
- * Avatar upload linking is retained (findUpload in D1), but the tus byte
- * storage is skipped in the CF experiment (no R2 binding yet).
+ * Avatar upload: direct-to-R2 multipart upload. The client POSTs the file
+ * to /profile/avatar with multipart/form-data; the Worker streams the body
+ * into the R2 AVATARS bucket and stores the public URL path in
+ * users.avatar_url. No tus protocol, no D1 upload metadata table needed.
  *
  * All DB/auth calls are async (D1 + Web Crypto).
  */
@@ -16,7 +18,6 @@ import {
   verifyPassword,
 } from "../auth";
 import {
-  findUpload,
   findUserByEmail,
   findUserById,
   updateUserAvatar,
@@ -26,10 +27,6 @@ import {
 import type { AppEnv } from "../inertia-middleware";
 import { validateJson } from "../validation";
 
-const avatarBody = t.Object(
-  { uploadId: t.String({ minLength: 1 }) },
-  { additionalProperties: false },
-);
 const infoBody = t.Object(
   {
     name: t.String({ minLength: 2, maxLength: 80 }),
@@ -46,7 +43,6 @@ const passwordBody = t.Object(
   { additionalProperties: false },
 );
 
-type AvatarBody = Static<typeof avatarBody>;
 type InfoBody = Static<typeof infoBody>;
 type PasswordBody = Static<typeof passwordBody>;
 
@@ -57,51 +53,61 @@ export const PROFILE_VALIDATION_MESSAGES: Record<string, string> = {
   "/passwordConfirmation": "Confirm your password.",
 };
 
+/** Max avatar file size — 2 MB. R2 streaming handles the body, but we cap
+ *  to prevent abuse. Workers has a 100 MB request body limit; 2 MB is
+ *  plenty for a profile picture and keeps R2 storage costs predictable. */
+const MAX_AVATAR_BYTES = 2 * 1024 * 1024;
+
+/** Raster-only: SVG can carry inline scripts, so we reject it even though
+ *  the CSP blocks inline scripts. Defense in depth. */
+const AVATAR_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+
+/** Generate a random R2 key for the avatar: avatars/{userId}/{random}.ext */
+function avatarKey(userId: number, filetype: string): string {
+  const ext = filetype.split("/")[1] ?? "bin";
+  const rand = crypto.getRandomValues(new Uint8Array(8));
+  const hex = Array.from(rand)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+  return `avatars/${userId}/${hex}.${ext}`;
+}
+
 export const profileRoutes = () => {
   const app = new Hono<AppEnv>();
 
   app.get("/profile", requireAuth, (c) => c.var.inertia.render("Profile", {}));
 
-  app.post(
-    "/profile/avatar",
-    requireAuth,
-    validateJson(avatarBody),
-    async (c) => {
-      const user = c.var.user;
-      if (!user) return new Response("Unauthorized", { status: 401 });
-      const body = c.req.valid("json") as AvatarBody;
-      const upload = await findUpload(body.uploadId);
-      if (!upload || upload.userId !== user.id) {
-        return new Response("Upload not found", { status: 404 });
-      }
-      if (upload.offset < upload.uploadLength) {
-        return new Response("Upload is not complete", { status: 400 });
-      }
-      let filetype = "";
-      try {
-        const meta = JSON.parse(upload.metadata) as Record<string, string>;
-        filetype = typeof meta.filetype === "string" ? meta.filetype : "";
-      } catch {
-        /* metadata may be empty or malformed */
-      }
-      // Raster-only: SVG can carry inline scripts — even with the
-      // per-path script-src 'none' on /uploads, keeping avatars raster
-      // avoids serving attacker-controlled scripts from our origin.
-      const AVATAR_TYPES = [
-        "image/png",
-        "image/jpeg",
-        "image/gif",
-        "image/webp",
-      ];
-      if (!AVATAR_TYPES.includes(filetype)) {
-        return new Response("Only image uploads can be used as an avatar", {
-          status: 422,
-        });
-      }
-      await updateUserAvatar(`/uploads/${upload.id}`, user.id);
-      return new Response(null, { status: 204 });
-    },
-  );
+  app.post("/profile/avatar", requireAuth, async (c) => {
+    const user = c.var.user;
+    if (!user) return new Response("Unauthorized", { status: 401 });
+
+    const bucket = c.env?.AVATARS;
+    if (!bucket) return new Response("Avatar storage not configured", { status: 503 });
+
+    // Multipart form-data: expect a single "file" field.
+    const formData = await c.req.formData();
+    const file = formData.get("file");
+    if (!(file instanceof File)) {
+      return new Response("No file uploaded", { status: 422 });
+    }
+    if (file.size > MAX_AVATAR_BYTES) {
+      return new Response("File too large (max 2 MB)", { status: 413 });
+    }
+    if (!AVATAR_TYPES.includes(file.type)) {
+      return new Response("Only PNG, JPEG, GIF, and WebP images are allowed", {
+        status: 422,
+      });
+    }
+
+    const key = avatarKey(user.id, file.type);
+    await bucket.put(key, file.stream(), {
+      httpMetadata: { contentType: file.type },
+    });
+
+    // Store the public URL path (served by avatars.routes.ts).
+    await updateUserAvatar(`/avatars/${key}`, user.id);
+    return new Response(null, { status: 204 });
+  });
 
   app.patch("/profile", requireAuth, validateJson(infoBody), async (c) => {
     const user = c.var.user;
