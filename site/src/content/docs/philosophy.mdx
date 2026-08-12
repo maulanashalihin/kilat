@@ -30,8 +30,8 @@ controllers. Boring? Yes. Followable at a glance? Far more.
 Every dependency is a liability: it must be upgraded, audited, and can break
 under you. When 60 lines of our own code are enough, we write them:
 
-- The rate limiter is a **no-op stub** (real limiting needs KV/Durable Objects
-  — add when you need it).
+- The rate limiter is **KV-backed** (fixed-window via Cloudflare KV, fails
+  open without the binding — 60 lines, no external dependency).
 - The Google OAuth client is **plain `fetch`** — no SDK.
 - CSS is **vanilla by default** — no framework.
 - The database layer is **raw D1 prepared statements** — no ORM.
