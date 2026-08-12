@@ -82,7 +82,11 @@ export const profileRoutes = () => {
     if (!user) return new Response("Unauthorized", { status: 401 });
 
     const bucket = c.env?.AVATARS;
-    if (!bucket) return new Response("Avatar storage not configured", { status: 503 });
+    if (!bucket)
+      return new Response(
+        "Avatar storage not configured. Enable R2 at https://dash.cloudflare.com → R2, then run: npx wrangler r2 bucket create kilat-avatars",
+        { status: 503 },
+      );
 
     // Multipart form-data: expect a single "file" field.
     const formData = await c.req.formData();

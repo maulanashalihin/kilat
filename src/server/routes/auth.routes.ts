@@ -216,11 +216,16 @@ export const authRoutes = () => {
     return page.redirect("/login?notice=password_reset");
   });
   // GET /verify-email?token=... — verify email address, redirect to login.
+  // If already logged in, redirect to dashboard with a flash message.
   app.get("/verify-email", async (c) => {
     const token = c.req.query("token") ?? "";
     const userId = await verifyEmailToken(token);
     if (!userId) {
       return c.var.inertia.redirect("/login?notice=invalid_verification");
+    }
+    if (c.var.user && c.var.sessionToken) {
+      await setFlash(c.var.sessionToken, { success: "Email verified successfully." });
+      return c.var.inertia.redirect("/dashboard");
     }
     return c.var.inertia.redirect("/login?notice=email_verified");
   });
