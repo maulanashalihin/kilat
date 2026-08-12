@@ -55,6 +55,11 @@
       </div>
     </div>
 
+    <p class="dl-alt-cmd">
+      No Bun? <code>npx create-kilat@latest my-app</code> works too —
+      <a href="https://bun.sh">install Bun</a> for the test suite and build scripts.
+    </p>
+
     <div class="dl-chips">
       <span>Workers</span><span>Hono</span><span>Inertia v3</span><span>D1</span><span>Web Crypto</span>
     </div>
@@ -275,4 +280,23 @@
     padding: 0.25rem 0.7rem;
     background: #0f141a;
   }
-</style>
+  .dl-alt-cmd {
+    margin: 1rem 0 0;
+    font-size: 0.85rem;
+    color: #8b95a5;
+  }
+  .dl-alt-cmd code {
+    color: #c2cdd9;
+    background: #0f141a;
+    border: 1px solid #1f2937;
+    border-radius: 0.3rem;
+    padding: 0.1rem 0.4rem;
+    font-size: 0.8rem;
+  }
+  .dl-alt-cmd a {
+    color: #059669;
+    text-decoration: none;
+  }
+  .dl-alt-cmd a:hover {
+    text-decoration: underline;
+  }
