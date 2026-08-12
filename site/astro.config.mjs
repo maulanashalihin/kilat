@@ -67,12 +67,14 @@ export default defineConfig({
             },
             { label: "Rate limiting", slug: "architecture/rate-limiting" },
             { label: "File uploads", slug: "architecture/file-uploads" },
+            { label: "Mailer", slug: "architecture/mailer" },
           ],
         },
         {
           label: "Auth",
           items: [
             { label: "Sessions & guards", slug: "auth/sessions-guards" },
+            { label: "Email verification", slug: "auth/email-verification" },
             { label: "Google OAuth", slug: "auth/google-oauth" },
             { label: "Password reset", slug: "auth/password-reset" },
           ],
