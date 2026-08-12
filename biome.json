@@ -6,7 +6,7 @@
     "useIgnoreFile": true
   },
   "files": {
-    "includes": ["src/**", "tests/**", "scripts/**"]
+    "includes": ["src/**", "tests/**", "scripts/**", "!**/.tailwind.css", "!**/*.css"]
   },
   "formatter": {
     "enabled": false

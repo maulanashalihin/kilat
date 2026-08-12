@@ -12,8 +12,8 @@
  * Run: bun run scripts/build.ts  (or `bun run build`)
  */
 import { createHash } from "node:crypto";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import esbuild from "esbuild";
 import { $ } from "bun";
 

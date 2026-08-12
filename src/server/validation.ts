@@ -55,7 +55,7 @@ export const validateJson = <T extends TSchema>(schema: T) =>
 			}
 		}
 		if (Value.Check(schema, value)) {
-			c.req.addValidatedData("json", value as Static<T> as {});
+			c.req.addValidatedData("json", value as Static<T> as Record<string, unknown>);
 			await next();
 			return;
 		}

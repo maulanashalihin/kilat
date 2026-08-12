@@ -50,16 +50,16 @@ describe("rate limit (KV fixed window)", () => {
   it("allows requests up to max, then blocks with 429", async () => {
     const kv = createKvMock();
     const app = buildApp({ max: 5, windowSeconds: 60, scope: "test" }, kv);
-    const req = (i: number) =>
+    const req = () =>
       app("http://localhost/", {
         headers: { "cf-connecting-ip": "1.2.3.4" },
       });
 
     for (let i = 0; i < 5; i++) {
-      expect((await req(i)).status).toBe(200);
+      expect((await req()).status).toBe(200);
     }
     for (let i = 5; i < 8; i++) {
-      const res = await req(i);
+      const res = await req();
       expect(res.status).toBe(429);
       expect(res.headers.get("retry-after")).toBe("60");
     }
