@@ -22,10 +22,15 @@ import {
   insertPasswordReset,
   insertSession,
   updateSessionFlash,
+  deleteEmailVerification,
+  deleteUserEmailVerifications,
+  findEmailVerification,
+  insertEmailVerification,
+  verifyUserEmail,
   type UserRow,
 } from "./db";
-import type { AppEnv } from "./inertia-middleware";
 import { config } from "./config";
+import type { AppEnv } from "./inertia-middleware";
 
 export const SESSION_COOKIE = "session";
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
@@ -219,6 +224,39 @@ export async function verifyPasswordReset(
 
 export async function clearPasswordResets(email: string): Promise<void> {
   await deletePasswordResetsByEmail(email);
+}
+
+// ---------------------------------------------------------------------------
+// Email verification tokens (hashed at rest; the raw token goes in the email)
+// ---------------------------------------------------------------------------
+
+export const EMAIL_VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
+
+/** Create a verification token for `userId` and return the raw token to email out. */
+export async function createEmailVerification(userId: number): Promise<string> {
+  const token = randomHex(32);
+  await deleteUserEmailVerifications(userId);
+  await insertEmailVerification(
+    await hashToken(token),
+    userId,
+    new Date(Date.now() + EMAIL_VERIFICATION_TTL_MS).toISOString(),
+  );
+  return token;
+}
+
+/** Verify a raw email verification token. Returns the user id on success
+ *  (and consumes the token + marks the user verified), or null on failure. */
+export async function verifyEmailToken(token: string): Promise<number | null> {
+  const hashed = await hashToken(token);
+  const row = await findEmailVerification(hashed);
+  if (!row) return null;
+  if (Date.now() > new Date(row.expiresAt).getTime()) {
+    await deleteEmailVerification(hashed);
+    return null;
+  }
+  await verifyUserEmail(row.userId);
+  await deleteUserEmailVerifications(row.userId);
+  return row.userId;
 }
 
 // ---------------------------------------------------------------------------

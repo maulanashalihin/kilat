@@ -12,9 +12,17 @@ import "./styles.css"; // custom CSS (overrides Tailwind via cascade)
 const resolve = (name: string) =>
 	pages[`./pages/${name}.tsx`]?.default ?? notFoundPage!;
 
+/** Read the CSP nonce from the <meta name="csp-nonce"> tag set by the server.
+ *  Used by Inertia for inline styles (progress bar, error modal) so they
+ *  pass a strict CSP without 'unsafe-inline'. */
+const cspNonce =
+	document.querySelector('meta[name="csp-nonce"]')?.getAttribute("content") ??
+	undefined;
+
 createInertiaApp({
 	id: "app",
 	resolve,
+	nonce: cspNonce,
 	// React Strict Mode (dev-only, no-op in production): catches unsafe
 	// lifecycles, double-render bugs, and legacy context API usage.
 	strictMode: true,
