@@ -121,7 +121,15 @@ function runInstall(targetDir) {
     execSync("bun install", { cwd: targetDir, stdio: "inherit" });
     return true;
   } catch {
-    return false;
+    // bun not found — fall back to npm.
+    try {
+      console.log('\x1b[33m! bun not found, falling back to npm install...\x1b[0m');
+      execSync("npm install", { cwd: targetDir, stdio: "inherit" });
+      console.log('\x1b[33m! Installed with npm. Install bun for faster installs: https://bun.sh\x1b[0m');
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 
@@ -159,6 +167,21 @@ async function patchWrangler(targetDir, projectName) {
   await writeFile(wranglerPath, content);
 }
 
+/** Check if wrangler is authenticated. Returns true if logged in. */
+function isWranglerAuthenticated(targetDir) {
+  try {
+    execSync("npx wrangler whoami", {
+      encoding: "utf8",
+      cwd: targetDir,
+      stdio: ["pipe", "pipe", "pipe"],
+      timeout: 10000,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /** Create remote KV namespace and R2 bucket, then patch wrangler.toml
  *  with the real IDs. Runs only when --remote flag is passed.
  *  R2 will fail gracefully if not enabled on the Cloudflare account. */
@@ -166,6 +189,14 @@ async function createBindings(targetDir, projectName) {
   const wranglerPath = join(targetDir, "wrangler.toml");
   if (!existsSync(wranglerPath)) return;
   let content = await readFile(wranglerPath, "utf8");
+
+  // Check if wrangler is authenticated before attempting remote operations.
+  if (!isWranglerAuthenticated(targetDir)) {
+    console.log('\x1b[33m! Wrangler is not authenticated. Run "npx wrangler login" first, then re-run with --remote.\x1b[0m');
+    console.log('\x1b[2m  Skipping remote KV + R2 creation. You can do this manually after login.\x1b[0m');
+    await writeFile(wranglerPath, content);
+    return;
+  }
 
   // KV namespace — required for rate limiting.
   // Wrangler doesn't support --json for kv namespace create, so we parse
@@ -377,7 +408,7 @@ async function main() {
     console.log("\x1b[36m↓\x1b[0m Installing dependencies with bun...");
     const ok = runInstall(targetDir);
     if (!ok) {
-      console.log('\x1b[33m! bun install failed. Run "bun install" manually.\x1b[0m');
+      console.log('\x1b[33m! Install failed. Run "npm install" or install bun: https://bun.sh\x1b[0m');
     }
   }
   // Auto-migrate local D1 so the app is ready to `bun run dev` immediately.
