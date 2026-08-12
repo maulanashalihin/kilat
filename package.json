@@ -30,6 +30,7 @@
     "db:migrate": "wrangler d1 migrations apply kilat --local",
     "db:migrate:remote": "wrangler d1 migrations apply kilat --remote",
     "db:seed": "bun run scripts/seed.ts",
+    "db:seed:remote": "bun run scripts/seed.ts -- --remote",
     "typecheck": "tsc --noEmit",
     "lint": "biome lint src tests scripts",
     "test": "bun test --isolate"
