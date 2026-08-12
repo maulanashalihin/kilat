@@ -9,6 +9,7 @@ edge — works for any file type: documents, images, PDFs, audio.
 
 ## Why R2?
 
+<<<<<<< HEAD
 | | R2 | Disk (Bun/Dulak) | External (S3) |
 | --- | --- | --- | --- |
 | Runtime | Workers (edge) | Bun (single server) | Any |
@@ -16,6 +17,15 @@ edge — works for any file type: documents, images, PDFs, audio.
 | Latency | ~5ms (co-located) | ~1ms (local disk) | ~50ms (cross-region) |
 | Setup | `wrangler r2 bucket create` | `mkdir uploads/` | IAM + SDK |
 | Scaling | Automatic | Disk-bound | Automatic |
+=======
+| | R2 | External (S3) |
+| --- | --- | --- |
+| Runtime | Workers (edge) | Any |
+| Egress | **Free** | $$ (per-GB) |
+| Latency | ~5ms (co-located) | ~50ms (cross-region) |
+| Setup | `wrangler r2 bucket create` | IAM + SDK |
+| Scaling | Automatic | Automatic |
+>>>>>>> 3de112d (docs: add rate limiting and file uploads articles, fix outdated refs)
 
 R2 is S3-compatible with **zero egress fees** — critical for apps that serve
 user-uploaded content. The Worker and R2 bucket are co-located in Cloudflare's
@@ -135,6 +145,7 @@ npx wrangler r2 bucket create kilat-avatars
 The rest of the app works normally — auth, SSR, D1, rate limiting. Only file
 upload and serving are affected.
 
+<<<<<<< HEAD
 ## Why not tus?
 
 The Bun/Dulak version of Kilat used the [tus](https://tus.io) resumable
@@ -148,6 +159,8 @@ single server, but on Workers:
 R2 multipart upload is simpler: one `POST` with `FormData`, stream directly
 to R2, done. For files under 100 MB (Workers' request body limit), this is
 all you need. For larger files, use R2 multipart upload with presigned URLs.
+=======
+>>>>>>> 3de112d (docs: add rate limiting and file uploads articles, fix outdated refs)
 
 ## Client-side
 
