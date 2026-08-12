@@ -63,6 +63,19 @@ to TypeScript on the edge:
 | ORM | none — raw prepared statements | Eloquent |
 | Deploy | `wrangler deploy` | Server + web server |
 | Latency | 300+ edge locations | Single region |
+<<<<<<< HEAD
+=======
+| Setup | `npm create kilat` → running | Install PHP, Composer, web server, DB |
+| Cold start | Sub-millisecond | ~250 ms (PHP-FPM worker spin-up) |
+| Monthly cost (paid) | $5 (Workers Paid) | VPS ($5–20) + DB ($0–30) |
+| Free to start | ✅ Yes — [100K req/day, 500 MB D1](/limits/) | ❌ No — need a server + database from day one |
+| Things to install | Bun (1 thing) | PHP + Composer + web server + DB server |
+
+Laravel gives you more batteries — queues, jobs, broadcasting, Eloquent
+relationships, Blade components, a massive ecosystem. Kilat gives you fewer,
+but what's there runs at the edge with zero ops. You can learn Laravel's
+conventions, or you can read Kilat end to end in an afternoon.
+>>>>>>> bf3faab (docs: switch to npm create as primary, bun as recommended)
 
 ## Why no ORM
 

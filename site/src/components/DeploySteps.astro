@@ -1,0 +1,123 @@
+---
+const steps = [
+  {
+    num: "1",
+    cmd: "npm create kilat@latest my-app",
+    desc: "Scaffold a full-stack app — auth, SSR, migrations, tests, all wired.",
+  },
+  {
+    num: "2",
+    cmd: "wrangler deploy",
+    desc: "Live on 300+ edge locations. No Docker, no VPS, no reverse proxy.",
+  },
+  {
+    num: "3",
+    cmd: "done.",
+    desc: "Free tier: 100K requests/day, 500 MB D1. No credit card required.",
+  },
+];
+---
+
+<section class="dl-deploy">
+  <h2 class="dl-section-title">From zero to <span class="dl-accent">live</span> in two commands</h2>
+  <p class="dl-section-sub">No DevOps degree required. No YAML files. No Kubernetes.</p>
+  <div class="dl-deploy-steps">
+    {steps.map((s) => (
+      <div class="dl-deploy-step">
+        <span class="dl-deploy-num">{s.num}</span>
+        <div class="dl-deploy-body">
+          <code class="dl-deploy-cmd">{s.cmd}</code>
+          <p class="dl-deploy-desc">{s.desc}</p>
+        </div>
+      </div>
+    ))}
+  </div>
+  <p class="dl-deploy-note">
+    Outgrew the free tier? <a href="/blog/migrating-to-dulak/">Migrate to Dulak</a>
+    — same stack on Bun, zero platform limits, one AI agent prompt.
+  </p>
+</section>
+
+<style>
+  .dl-deploy {
+    max-width: 760px;
+    margin: 4.5rem auto 4.5rem;
+    padding: 0 1.5rem;
+  }
+  .dl-section-title {
+    font-size: 1.7rem;
+    letter-spacing: -0.02em;
+    text-align: center;
+  }
+  .dl-section-sub {
+    text-align: center;
+    color: #8b95a5;
+    margin: 0.4rem 0 2.2rem;
+  }
+  .dl-accent { color: #34d399; }
+  .dl-deploy-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+  }
+  .dl-deploy-step {
+    display: flex;
+    align-items: flex-start;
+    gap: 1rem;
+    border: 1px solid #1f2937;
+    border-radius: 0.75rem;
+    padding: 1.4rem;
+    background: #0f141a;
+    transition: border-color 0.2s ease;
+  }
+  .dl-deploy-step:hover {
+    border-color: #059669;
+  }
+  .dl-deploy-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 0.5rem;
+    background: rgba(5, 150, 105, 0.12);
+    color: #34d399;
+    font-weight: 700;
+    font-size: 1rem;
+    flex-shrink: 0;
+  }
+  .dl-deploy-body {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+  }
+  .dl-deploy-cmd {
+    font-family: "SF Mono", "Fira Code", monospace;
+    font-size: 0.95rem;
+    color: #34d399;
+    background: #0f141a;
+    border: 1px solid #1f2937;
+    border-radius: 0.4rem;
+    padding: 0.3rem 0.7rem;
+    align-self: flex-start;
+  }
+  .dl-deploy-desc {
+    margin: 0;
+    font-size: 0.88rem;
+    line-height: 1.55;
+    color: #9aa4b2;
+  }
+  .dl-deploy-note {
+    text-align: center;
+    margin: 2rem 0 0;
+    color: #8b95a5;
+    font-size: 0.9rem;
+  }
+  .dl-deploy-note a {
+    color: #34d399;
+    text-decoration: none;
+  }
+  .dl-deploy-note a:hover {
+    text-decoration: underline;
+  }
+</style>
