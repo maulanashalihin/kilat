@@ -17,8 +17,8 @@ src/
 │   ├── inertia-middleware.ts # per-request session resolve → c.var (AppEnv)
 │   ├── validation.ts       # TypeBox JSON validation → ValidationFailed (422)
 │   ├── mailer.ts           # mail drivers: log / resend / mailtrap
-│   ├── rate-limit.ts       # no-op stub (use KV/DO for real limiting)
-│   ├── logger.ts           # per-request console.log + crypto.randomUUID
+│   ├── rate-limit.ts       # KV-backed fixed-window rate limiter (fails open without binding)
+│   ├── logger.ts           # structured JSON logging for Workers Observability
 │   ├── security.ts         # CSRF origin check (headers via hono/secure-headers)
 │   ├── url.ts              # defensive request-URL parsing
 │   ├── assets.ts           # re-exports InertiaAssets type
@@ -26,7 +26,8 @@ src/
 │       ├── auth.routes.ts         # /login /register /logout /forgot/reset (GET+POST)
 │       ├── google-oauth.routes.ts # /auth/google, /auth/google/callback
 │       ├── pages.routes.ts        # app-shell pages: /, /dashboard, /admin
-│       └── profile.routes.ts      # /profile page + /profile/avatar
+│       ├── profile.routes.ts      # /profile page + /profile/avatar
+│       └── avatars.routes.ts     # /avatars/* — R2 avatar serving
 ├── client/
 │   ├── app.tsx             # Inertia client bootstrap (hydrate or render)
 │   ├── ssr.tsx             # in-process SSR renderer (react-dom/server)
@@ -54,8 +55,8 @@ routes or independent of Hono's context.
 
 ## How `worker.ts` wires a request
 
-The Workers runtime calls `fetch` per request. `env` carries the D1 + ASSETS
-bindings and environment variables:
+The Workers runtime calls `fetch` per request. `env` carries the D1, ASSETS,
+KV, and R2 bindings plus environment variables:
 
 ```ts
 // src/worker.ts
@@ -68,6 +69,8 @@ import type { InertiaAssets } from "./server/inertia";
 export interface Env extends EnvVars {
   DB: D1Database;
   ASSETS: Fetcher;
+  RATE_LIMIT_KV: KVNamespace;
+  AVATARS: R2Bucket;
 }
 
 const assets = manifest as InertiaAssets;
