@@ -30,7 +30,12 @@
     "db:migrate": "wrangler d1 migrations apply kilat --local",
     "db:migrate:remote": "wrangler d1 migrations apply kilat --remote",
     "db:seed": "bun run scripts/seed.ts",
+<<<<<<< HEAD
     "typecheck": "svelte-check --tsconfig ./tsconfig.json",
+=======
+    "db:seed:remote": "bun run scripts/seed.ts -- --remote",
+    "typecheck": "tsc --noEmit",
+>>>>>>> 91955c3 (feat: improve scaffold flow, seed --remote, email verify UX, R2 message, env bindings)
     "lint": "biome lint src tests scripts",
     "test": "bun test --isolate"
   },

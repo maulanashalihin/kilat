@@ -16,7 +16,11 @@ export const avatarRoutes = () => {
 
   app.get("/avatars/*", async (c) => {
     const bucket = c.env?.AVATARS;
-    if (!bucket) return new Response("Avatar storage not configured", { status: 503 });
+    if (!bucket)
+      return new Response(
+        "Avatar storage not configured. Enable R2 at https://dash.cloudflare.com → R2, then run: npx wrangler r2 bucket create kilat-avatars",
+        { status: 503 },
+      );
 
     // Strip the leading "/avatars/" prefix to get the R2 key.
     const key = decodeURIComponent(

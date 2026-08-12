@@ -73,6 +73,24 @@ MAIL_FROM = "no-reply@staging.example.com"
 enabled = true
 head_sampling_rate = 1
 
+# Per-env bindings — create separate resources for each environment:
+#   npx wrangler kv namespace create RATE_LIMIT_KV --env staging
+#   npx wrangler d1 create kilat-staging
+#   npx wrangler r2 bucket create kilat-avatars-staging
+[[env.staging.kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "YOUR_STAGING_KV_ID"
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_id = "YOUR_STAGING_D1_ID"
+database_name = "kilat-staging"
+migrations_dir = "migrations"
+
+[[env.staging.r2_buckets]]
+binding = "AVATARS"
+bucket_name = "kilat-avatars-staging"
+
 [env.production]
 name = "kilat"
 
@@ -85,3 +103,17 @@ MAIL_FROM = "no-reply@example.com"
 [env.production.observability]
 enabled = true
 head_sampling_rate = 0.1
+
+[[env.production.kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "YOUR_PRODUCTION_KV_ID"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_id = "YOUR_PRODUCTION_D1_ID"
+database_name = "kilat-production"
+migrations_dir = "migrations"
+
+[[env.production.r2_buckets]]
+binding = "AVATARS"
+bucket_name = "kilat-avatars-production"
