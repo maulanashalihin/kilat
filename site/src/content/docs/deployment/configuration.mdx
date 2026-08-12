@@ -173,8 +173,8 @@ for libraries that expect Node globals.
 ## Environments
 
 The base config above is the local-dev default. Named environments override
-only the fields that differ; bindings inherit the base names but each
-environment needs its own remote IDs.
+only the fields that differ; each environment needs its own remote IDs for
+KV, D1, and R2.
 
 ```toml
 [env.staging]
@@ -190,6 +190,20 @@ MAIL_FROM = "no-reply@staging.example.com"
 enabled = true
 head_sampling_rate = 1
 
+[[env.staging.kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "YOUR_STAGING_KV_ID"
+
+[[env.staging.d1_databases]]
+binding = "DB"
+database_id = "YOUR_STAGING_D1_ID"
+database_name = "kilat-staging"
+migrations_dir = "migrations"
+
+[[env.staging.r2_buckets]]
+binding = "AVATARS"
+bucket_name = "kilat-avatars-staging"
+
 [env.production]
 name = "kilat"
 
@@ -202,6 +216,20 @@ MAIL_FROM = "no-reply@example.com"
 [env.production.observability]
 enabled = true
 head_sampling_rate = 0.1
+
+[[env.production.kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "YOUR_PRODUCTION_KV_ID"
+
+[[env.production.d1_databases]]
+binding = "DB"
+database_id = "YOUR_PRODUCTION_D1_ID"
+database_name = "kilat-production"
+migrations_dir = "migrations"
+
+[[env.production.r2_buckets]]
+binding = "AVATARS"
+bucket_name = "kilat-avatars-production"
 ```
 
 Deploy to a specific environment:
@@ -221,6 +249,10 @@ Production samples 10% of requests (`head_sampling_rate = 0.1`) versus staging's
 100% (`1`). Create the per-environment bindings before first deploy:
 
 ```sh
+npx wrangler kv namespace create RATE_LIMIT_KV --env staging
+npx wrangler d1 create kilat-staging
+npx wrangler r2 bucket create kilat-avatars-staging
+
 npx wrangler kv namespace create RATE_LIMIT_KV --env production
 npx wrangler d1 create kilat-production
 npx wrangler r2 bucket create kilat-avatars-production
