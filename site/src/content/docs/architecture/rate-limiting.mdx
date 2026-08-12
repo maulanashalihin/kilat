@@ -1,0 +1,148 @@
+---
+title: Rate limiting
+description: KV-backed fixed-window rate limiting — how it works, trade-offs, and tuning.
+---
+
+Kilat ships a KV-backed fixed-window rate limiter in `src/server/rate-limit.ts`.
+It protects auth endpoints from brute-force attacks and provides a global DDoS
+baseline — without a single external dependency.
+
+## How it works
+
+Each request reads a counter from Cloudflare KV, increments it, and writes it
+back with a TTL. The counter is scoped by IP address and namespace (e.g.
+`auth` vs `global`):
+
+```
+key = ratelimit:{scope}:{clientIp}
+value = { window: <unix_timestamp>, count: <n> }
+```
+
+The window is a fixed time slice (e.g. 60 seconds). When the window rolls
+over, the counter resets. If the counter exceeds `max`, the request gets a
+`429 Too Many Requests` response with a `Retry-After` header.
+
+```ts
+// src/server/rate-limit.ts (simplified)
+const windowStart = Math.floor(now / windowSeconds) * windowSeconds;
+const key = `ratelimit:${scope}:${clientIp(c)}`;
+
+const raw = await kv.get(key);
+let count = 0;
+if (raw) {
+  const data = JSON.parse(raw);
+  if (data.window === windowStart) count = data.count;
+}
+
+if (count >= opts.max) {
+  return new Response("Too Many Requests", {
+    status: 429,
+    headers: { "retry-after": String(opts.windowSeconds) },
+  });
+}
+
+await kv.put(key, JSON.stringify({ window: windowStart, count: count + 1 }), {
+  expirationTtl: opts.windowSeconds * 2,
+});
+return next();
+```
+
+## Two layers
+
+| Layer | Scope | Default | Paths |
+| --- | --- | --- | --- |
+| **Auth limiter** | `auth` | 30 req / 60s | `/login`, `/register`, `/forgot-password`, `/reset-password`, `/logout` |
+| **Global limiter** | `global` | 200 req / 60s | All routes except `/health`, `/assets/*`, `/.well-known/*`, `/avatars/*` |
+
+The auth limiter is mounted on the `authRoutes` sub-app with a `paths` filter
+so it only counts auth endpoints — not every route under the mount point.
+
+The global limiter is mounted on the main app and exempts infrastructure paths
+(health checks, static assets, DevTools probes, avatar serving).
+
+## Why KV, not Durable Objects?
+
+Cloudflare KV is eventually consistent — the `get → put` sequence is not
+atomic. Under very high concurrency, the counter can under-count (two requests
+read the same value, both write `count + 1` instead of `count + 2`).
+
+This is **acceptable for rate limiting**. Cloudflare's own guidance accepts
+KV-based rate limiting for most use cases. The trade-off:
+
+| | KV | Durable Objects |
+| --- | --- | --- |
+| Cost | Free tier: 100K reads/day | $0.15/million requests |
+| Latency | ~10ms read | ~5ms (co-located) |
+| Atomicity | Eventual consistency | Strong consistency |
+| Complexity | 60 lines, no SDK | WebSocket protocol, state management |
+
+For strict atomicity (e.g. payment endpoints), use a Durable Object. For
+brute-force protection on auth endpoints, KV is sufficient — an attacker
+sending 100 concurrent requests still gets rate-limited within ~1 second
+of KV propagation.
+
+## Fail-open behavior
+
+If the KV binding is missing (e.g. local dev without the namespace, or a
+misconfigured `wrangler.toml`), the limiter **fails open** — requests pass
+through unthrottled:
+
+```ts
+const kv = c.env?.RATE_LIMIT_KV;
+if (!kv) return next(); // fail open
+```
+
+This means:
+
+- **Local dev works** without creating a KV namespace (Miniflare simulates it,
+  but even without the binding, the app runs).
+- **A misconfigured production deploy** is not taken down by the rate limiter —
+  it's a security degradation, not an outage.
+
+Keep the `RATE_LIMIT_KV` binding in your production `wrangler.toml` to ensure
+the limiter is active.
+
+## Tuning
+
+Override the defaults via environment variables in `wrangler.toml`:
+
+```toml
+[vars]
+RATE_LIMIT_GLOBAL_MAX = "200"
+RATE_LIMIT_GLOBAL_WINDOW = "60"
+RATE_LIMIT_AUTH_MAX = "30"
+RATE_LIMIT_AUTH_WINDOW = "60"
+```
+
+Set `RATE_LIMIT_AUTH_MAX = "0"` to disable the auth limiter (useful for
+load testing). The global limiter can be disabled the same way.
+
+## Client IP detection
+
+The limiter uses Cloudflare's `cf-connecting-ip` header, with
+`x-forwarded-for` as a fallback:
+
+```ts
+function clientIp(c: Context<AppEnv>): string {
+  const cf = c.req.raw.headers.get("cf-connecting-ip");
+  if (cf) return cf;
+  const fwd = c.req.raw.headers.get("x-forwarded-for");
+  if (fwd) return fwd.split(",")[0]!.trim();
+  return "unknown";
+}
+```
+
+On Cloudflare Workers, `cf-connecting-ip` is always present and trustworthy —
+it's set by Cloudflare's edge, not by the client.
+
+## Testing
+
+The rate limiter is unit-tested in `tests/rate-limit.test.ts` with an
+in-memory KV mock — no Wrangler or Miniflare needed:
+
+- Allows requests up to `max`, then blocks with 429
+- Resets the counter when the window rolls over
+- Separates counters per scope and per IP
+- Fails open without a KV binding
+- Fails open when disabled (`max <= 0`)
+- Only enforces configured paths (sub-app middleware semantics)
