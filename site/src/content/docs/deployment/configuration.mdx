@@ -1,6 +1,6 @@
 ---
 title: Configuration
-description: wrangler.toml vars, secrets, D1 binding, and the nodejs_compat flag.
+description: wrangler.toml vars, secrets, D1, R2, KV bindings, environments, and the nodejs_compat flag.
 ---
 
 Kilat is configured through `wrangler.toml` and Wrangler secrets. There is no
@@ -15,16 +15,29 @@ main = "src/worker.ts"
 compatibility_date = "2025-07-01"
 compatibility_flags = ["nodejs_compat"]
 
+[observability]
+enabled = true
+head_sampling_rate = 1
+
 [vars]
 NODE_ENV = "development"
 SSR = "true"
 MAIL_DRIVER = "log"
 MAIL_FROM = "no-reply@example.com"
 
+[[kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "YOUR_KV_NAMESPACE_ID"
+
 [[d1_databases]]
 binding = "DB"
 database_id = "YOUR_D1_DATABASE_ID"
+database_name = "kilat"
 migrations_dir = "migrations"
+
+[[r2_buckets]]
+binding = "AVATARS"
+bucket_name = "kilat-avatars"
 
 [assets]
 directory = "./dist"
@@ -73,6 +86,30 @@ them identically. `config.ts` validates relationships (e.g.
 `MAIL_DRIVER=resend` requires `RESEND_API_KEY`; Google ID and secret must be set
 together).
 
+## KV binding (rate limiting)
+
+```toml
+[[kv_namespaces]]
+binding = "RATE_LIMIT_KV"
+id = "YOUR_KV_NAMESPACE_ID"
+```
+
+The rate limiter (`src/server/rate-limit.ts`) is KV-backed. `binding =
+"RATE_LIMIT_KV"` exposes the namespace as `env.RATE_LIMIT_KV` in the Worker,
+where counters are read and incremented per request. Create the namespace once
+per project and paste its id:
+
+```sh
+npx wrangler kv namespace create RATE_LIMIT_KV
+```
+
+Local dev (`wrangler dev --local`) simulates the namespace via Miniflare, so any
+placeholder id works. **Without the binding the limiter fails OPEN** — requests
+pass through unthrottled — so keep this binding in your production
+`wrangler.toml`. Optional tuning vars (`RATE_LIMIT_GLOBAL_MAX`,
+`RATE_LIMIT_GLOBAL_WINDOW`, `RATE_LIMIT_AUTH_MAX`, `RATE_LIMIT_AUTH_WINDOW`)
+override the defaults of 200 req/60s global and 30 req/60s auth.
+
 ## D1 binding
 
 ```toml
@@ -87,6 +124,26 @@ migrations_dir = "migrations"
 `initDb(env.DB)` runs per-request in `src/worker.ts` to set the module-level
 `d1` reference used by `db.ts`. All queries are async:
 `await env.DB.prepare(sql).bind(...).first()`.
+
+## R2 binding (avatar storage)
+
+```toml
+[[r2_buckets]]
+binding = "AVATARS"
+bucket_name = "kilat-avatars"
+```
+
+Avatar uploads stream to R2 via multipart form-data at `POST /profile/avatar`.
+`binding = "AVATARS"` exposes the bucket as `env.AVATARS` in the Worker. Create
+the bucket once per project:
+
+```sh
+npx wrangler r2 bucket create kilat-avatars
+```
+
+Uploaded avatars are served from `/avatars/*` via `avatars.routes.ts`, with edge
+caching so repeat fetches hit the CDN. Local dev (`wrangler dev --local`)
+simulates the binding via Miniflare.
 
 ## ASSETS binding
 
@@ -112,3 +169,59 @@ Enables a subset of Node.js APIs on Workers. However, **prefer the Web Crypto
 API** (`crypto.subtle`, `crypto.getRandomValues`, `crypto.randomUUID`) for
 crypto operations — `node:crypto` is not available. `nodejs_compat` is mainly
 for libraries that expect Node globals.
+
+## Environments
+
+The base config above is the local-dev default. Named environments override
+only the fields that differ; bindings inherit the base names but each
+environment needs its own remote IDs.
+
+```toml
+[env.staging]
+name = "kilat-staging"
+
+[env.staging.vars]
+NODE_ENV = "production"
+SSR = "true"
+MAIL_DRIVER = "log"
+MAIL_FROM = "no-reply@staging.example.com"
+
+[env.staging.observability]
+enabled = true
+head_sampling_rate = 1
+
+[env.production]
+name = "kilat"
+
+[env.production.vars]
+NODE_ENV = "production"
+SSR = "true"
+MAIL_DRIVER = "resend"
+MAIL_FROM = "no-reply@example.com"
+
+[env.production.observability]
+enabled = true
+head_sampling_rate = 0.1
+```
+
+Deploy to a specific environment:
+
+```sh
+wrangler deploy --env staging
+wrangler deploy --env production
+```
+
+Secrets are also per-environment:
+
+```sh
+wrangler secret put RESEND_API_KEY --env production
+```
+
+Production samples 10% of requests (`head_sampling_rate = 0.1`) versus staging's
+100% (`1`). Create the per-environment bindings before first deploy:
+
+```sh
+npx wrangler kv namespace create RATE_LIMIT_KV --env production
+npx wrangler d1 create kilat-production
+npx wrangler r2 bucket create kilat-avatars-production
+```
