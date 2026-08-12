@@ -15,6 +15,7 @@ import Register from "./pages/Register";
 import ResetPassword from "./pages/ResetPassword";
 
 // Pages receive Inertia page props of varying shapes — widen deliberately.
+// biome-ignore lint/suspicious/noExplicitAny: page props are heterogeneous
 type PageModule = { default: ComponentType<any> };
 
 export const pages: Record<string, PageModule> = {
