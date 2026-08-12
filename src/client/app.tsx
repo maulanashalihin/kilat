@@ -15,7 +15,11 @@ const resolve = (name: string) =>
 createInertiaApp({
 	id: "app",
 	resolve,
+	// React Strict Mode (dev-only, no-op in production): catches unsafe
+	// lifecycles, double-render bugs, and legacy context API usage.
+	strictMode: true,
 	setup({ el, App, props }) {
+		if (!el) return;
 		const element = <App {...props} />;
 		if (el.hasAttribute("data-server-rendered")) {
 			hydrateRoot(el, element);
