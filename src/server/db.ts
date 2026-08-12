@@ -105,7 +105,7 @@ export const createGoogleUser = (
 ) =>
   d1
     .prepare(
-      "INSERT INTO users (name, email, password_hash, google_id, avatar_url) VALUES (?, '', ?, ?) RETURNING id",
+      "INSERT INTO users (name, email, password_hash, google_id, avatar_url) VALUES (?, ?, '', ?, ?) RETURNING id",
     )
     .bind(name, email, googleId, avatarUrl)
     .first<{ id: number }>();
