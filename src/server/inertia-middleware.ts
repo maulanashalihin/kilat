@@ -26,6 +26,9 @@ export interface AppEnv {
     /** KV namespace for the rate limiter (see wrangler.toml). Optional at
      *  the type level so tests/local runs without the binding fail open. */
     RATE_LIMIT_KV?: KVNamespace;
+    /** R2 bucket for avatar storage (see wrangler.toml). Optional at the
+     *  type level so tests/local runs without the binding skip R2 features. */
+    AVATARS?: R2Bucket;
   };
   Variables: {
     user: User | null;
