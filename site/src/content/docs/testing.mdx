@@ -1,11 +1,14 @@
 ---
 title: Testing
-description: bun test --isolate E2E suite driving the full Hono app via app.request().
+description: bun test --isolate unit + E2E suite — unit tests for auth, db, validation, and rate limiting, plus E2E tests driving the full Hono app via app.request().
 ---
 
-Kilat ships an end-to-end test suite in `tests/app.test.ts` using `bun:test`.
-It boots the full Hono app and drives it through `app.request()` — no HTTP
-server, no Workers runtime, just the app logic with an in-memory D1.
+Kilat ships a test suite across five files in `tests/` using `bun:test`:
+`app.test.ts` (E2E), `auth.test.ts`, `db.test.ts`, `validation.test.ts`, and
+`rate-limit.test.ts` (unit). The E2E suite boots the full Hono app and drives
+it through `app.request()` — no HTTP server, no Workers runtime, just the app
+logic with an in-memory D1. The unit suites test pure functions and modules
+in isolation.
 
 ## Run the tests
 
@@ -45,7 +48,68 @@ The helper `call(path, options)` builds a `Request` and invokes
 `app.request()` directly — same code path a real Worker takes, minus the
 network.
 
+## Unit tests
+
+The unit suites test pure functions and modules without booting the app. They
+share the `--isolate` requirement (each file gets its own module registry) but
+need no D1 or Hono setup.
+
+### `auth.test.ts` (32 tests)
+
+Exercises the auth helpers in `src/server/auth.ts`:
+
+- `hashPassword` / `verifyPassword` round-trip, wrong-password rejection,
+  timing-safe comparison
+- `hashToken` produces stable, distinct digests
+- Session CRUD: create, get, delete, expiry
+- Flash messages: set, peek, consume, auto-expiry
+- Password reset tokens: issue, verify, invalidate, expiry
+- Email verification tokens: issue, verify, invalidate, expiry
+
+### `db.test.ts` (35 tests)
+
+Exercises the D1 data layer in `src/server/db.ts` against an in-memory D1 mock:
+
+- Users CRUD: insert, get by id/email, update, delete
+- Sessions: insert, get, delete
+- Password resets: insert, get, delete, expiry
+- Email verifications: insert, get, delete
+- Uploads: insert, list, delete
+- `GET /health` row count
+- `toPublicUser` strips sensitive fields (password hash, tokens)
+
+### `validation.test.ts` (10 tests)
+
+Exercises `validateJson` and the `ValidationFailed` error in
+`src/server/validation.ts`:
+
+- Valid body passes through unchanged
+- Missing required fields → 422 with field list
+- Wrong types → 422
+- Invalid email format → 422
+- `additionalProperties: false` rejects extra keys
+- Malformed JSON body → 400
+- Non-JSON content-type → 400
+- `ValidationFailed` exposes `.status`, `.code`, `.fields`
+- Email format registry validates and rejects common malformed variants
+
+### `rate-limit.test.ts` (6 tests)
+
+Exercises the KV fixed-window limiter in `src/server/rate-limit.ts` with an
+in-memory mock KV:
+
+- First request within window is allowed
+- Requests over the limit within the window are blocked
+- Counter resets at the window boundary
+- Per-key isolation (different keys have independent counters)
+- `X-RateLimit-Remaining` decrements correctly
+- Headers reflect the active window
+
 ## What's covered
+
+The subsections below describe the **E2E** coverage in `app.test.ts`. Unit
+coverage lives in the four unit suites — see [Unit tests](#unit-tests) above
+for the per-file breakdown.
 
 ### Auth basics
 
@@ -90,10 +154,18 @@ network.
 - `/assets/*` serves static files with correct content-type
 - `/auth/google` returns 400 when unconfigured, 302 to Google when configured
 
+### Unit tests
+
+The unit suites cover the pure-function and data-layer contracts the E2E suite
+relies on: password/token hashing, session and token CRUD, the D1 query layer,
+JSON request validation, and the KV rate limiter. See
+[Unit tests](#unit-tests) for the full per-file breakdown.
+
 ## Before submitting
 
 ```sh
 bun run typecheck   # tsc --noEmit (covers src/ and scripts/)
+bun run lint        # biome lint src tests scripts
 bun run test        # bun test --isolate
 ```
 

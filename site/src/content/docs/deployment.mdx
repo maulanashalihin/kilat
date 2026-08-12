@@ -23,6 +23,17 @@ wrangler deploy
 That's it. `wrangler deploy` uploads the Worker bundle and routes traffic
 globally within seconds.
 
+Kilat uses environment-specific configs (`[env.staging]` and
+`[env.production]` in `wrangler.toml`). Deploy to a specific environment:
+
+```sh
+# Deploy to staging
+wrangler deploy --env staging
+
+# Deploy to production
+wrangler deploy --env production
+```
+
 ## What happens at the edge
 
 - **Worker** — your Hono app runs at the nearest of 300+ Cloudflare locations
@@ -45,11 +56,19 @@ anything.
 ## Before you deploy
 
 1. **Set your secrets** — `wrangler secret put` for `RESEND_API_KEY`,
-   `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, etc. See
-   [Configuration](./configuration).
+   `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, etc. Use `--env production`
+   for production secrets (e.g. `wrangler secret put RESEND_API_KEY --env production`).
+   See [Configuration](./configuration).
 2. **Set `NODE_ENV = "production"`** — enables `secure` cookies and production
    behavior.
-3. **Run migrations** with `--remote` (not `--local`) — your local D1 is a
+3. **Create the R2 bucket and KV namespace** — Kilat needs an R2 bucket for
+   avatar storage and a KV namespace for rate limiting:
+   ```sh
+   npx wrangler r2 bucket create kilat-avatars
+   npx wrangler kv namespace create RATE_LIMIT_KV
+   ```
+   Update the placeholder IDs in `wrangler.toml` with the returned IDs.
+4. **Run migrations** with `--remote` (not `--local`) — your local D1 is a
    separate database.
 
 ## Deploying updates
