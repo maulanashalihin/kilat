@@ -1,0 +1,189 @@
+---
+title: File uploads
+description: R2 object storage pattern for user-uploaded files — multipart streaming, key structure, caching, security, and graceful degradation.
+---
+
+Kilat uses Cloudflare R2 for user-uploaded files. Avatars are the first
+use case, but the same pattern — stream to R2, serve from R2, cache at the
+edge — works for any file type: documents, images, PDFs, audio.
+
+## Why R2?
+
+| | R2 | Disk (Bun/Dulak) | External (S3) |
+| --- | --- | --- | --- |
+| Runtime | Workers (edge) | Bun (single server) | Any |
+| Egress | **Free** | N/A | $$ (per-GB) |
+| Latency | ~5ms (co-located) | ~1ms (local disk) | ~50ms (cross-region) |
+| Setup | `wrangler r2 bucket create` | `mkdir uploads/` | IAM + SDK |
+| Scaling | Automatic | Disk-bound | Automatic |
+
+R2 is S3-compatible with **zero egress fees** — critical for apps that serve
+user-uploaded content. The Worker and R2 bucket are co-located in Cloudflare's
+network, so reads are ~5ms.
+
+## The pattern
+
+Two routes, one bucket:
+
+1. **Upload** — `POST /<resource>/upload` streams the file body to R2 via
+   multipart `FormData`, stores the public path in D1.
+2. **Serve** — `GET /uploads/*` (or `/avatars/*`) reads from R2 and streams
+   back with cache headers.
+
+No disk storage, no temp files, no external upload service.
+
+### Upload
+
+```ts
+// The pattern: validate → stream to R2 → store path in D1
+app.post("/profile/avatar", requireAuth, async (c) => {
+  const bucket = c.env?.AVATARS;
+  if (!bucket) return new Response("R2 not configured", { status: 503 });
+
+  const formData = await c.req.formData();
+  const file = formData.get("file");
+  if (!(file instanceof File)) return new Response("No file", { status: 422 });
+
+  // 1. Validate type and size
+  const ALLOWED = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+  if (!ALLOWED.includes(file.type)) return new Response("Invalid type", { status: 422 });
+  if (file.size > MAX_AVATAR_BYTES) return new Response("Too large", { status: 413 });
+
+  // 2. Generate a random key — scoped by user, unguessable
+  const key = `avatars/${user.id}/${randomHex()}.${ext}`;
+  await bucket.put(key, file.stream(), {
+    httpMetadata: { contentType: file.type },
+  });
+
+  // 3. Store the public URL path in D1
+  await updateUserAvatar(`/avatars/${key}`, user.id);
+  return new Response(null, { status: 204 });
+});
+```
+
+### Serve
+
+```ts
+// Dedicated route — not through the static asset binding
+app.get("/avatars/*", async (c) => {
+  const bucket = c.env?.AVATARS;
+  if (!bucket) return new Response("R2 not configured", { status: 503 });
+
+  const key = safeUrl(c.req.url).pathname.slice("/avatars/".length);
+  const object = await bucket.get(key);
+  if (object === null) return new Response("Not found", { status: 404 });
+
+  const headers = new Headers();
+  object.writeHttpMetadata(headers);
+  headers.set("etag", object.httpEtag);
+  headers.set("cache-control", "public, max-age=3600");
+  return new Response(object.body, { headers });
+});
+```
+
+`cache-control: public, max-age=3600` tells Cloudflare's edge to cache files
+for 1 hour. Since the R2 key includes a random component, a new upload gets a
+new URL — stale cache is never served after an update.
+
+## R2 key structure
+
+```
+{type}/{userId}/{random16hex}.{ext}
+```
+
+- `type` — namespace per feature (`avatars`, `documents`, `covers`, ...)
+- `userId` — scope per user, easy to audit or bulk-delete
+- Random hex — prevents URL guessing and cache collisions
+- Extension — matches the original file type
+
+## Adding a new upload type
+
+The avatar implementation is the reference. To add a new upload type (e.g.
+document attachments):
+
+1. **Add a route** in `routes/<feature>.routes.ts` — validate, stream to R2,
+   store the path in D1.
+2. **Add a serve route** (or reuse `/uploads/*` with a key prefix).
+3. **Add validation** — allowed types, max size, per-feature limits.
+4. **Update CSP** if serving from a new path prefix (`img-src`, `media-src`).
+
+The R2 bucket is shared — one `AVATARS` binding can hold multiple key
+prefixes. Or create a separate bucket per file type if you prefer isolation.
+
+## Security
+
+| Concern | Mitigation |
+| --- | --- |
+| XSS via SVG | Only raster types allowed for avatars — SVG can carry inline scripts |
+| File size abuse | Per-route size cap (avatars: 2 MB) |
+| Unauthorized upload | `requireAuth` guard + user ID in key |
+| CSRF | Origin check on all POST routes (see `security.ts`) |
+| Content-type spoofing | `httpMetadata.contentType` set from `file.type`, not user-controlled |
+| Path traversal | R2 keys are flat strings — no filesystem to traverse |
+
+## Graceful degradation
+
+If R2 is not enabled on the Cloudflare account, or the binding is missing,
+both upload and serving return a clear 503 with instructions:
+
+```
+Avatar storage not configured. Enable R2 at
+https://dash.cloudflare.com → R2, then run:
+npx wrangler r2 bucket create kilat-avatars
+```
+
+The rest of the app works normally — auth, SSR, D1, rate limiting. Only file
+upload and serving are affected.
+
+## Why not tus?
+
+The Bun/Dulak version of Kilat used the [tus](https://tus.io) resumable
+upload protocol with chunked PATCH requests. That works for large files on a
+single server, but on Workers:
+
+- **No disk** — tus needs a backing store for partial uploads
+- **No request state** — Workers don't persist state between invocations
+- **Complexity** — tus requires offset tracking, resume logic, a metadata table
+
+R2 multipart upload is simpler: one `POST` with `FormData`, stream directly
+to R2, done. For files under 100 MB (Workers' request body limit), this is
+all you need. For larger files, use R2 multipart upload with presigned URLs.
+
+## Client-side
+
+The Profile page sends a `FormData` request when the user picks a file:
+
+```tsx
+async function uploadAvatar(file: File) {
+  const form = new FormData();
+  form.append("file", file);
+  const res = await fetch("/profile/avatar", { method: "POST", body: form });
+  if (!res.ok) { /* show error */ return; }
+  router.reload(); // refresh shared props so the avatar updates
+}
+```
+
+No progress bar — for a 2 MB file, the upload completes in under a second.
+For larger files, add a progress handler via `XMLHttpRequest.upload.onprogress`
+or switch to R2 multipart upload.
+
+## Setup
+
+```sh
+# Create the R2 bucket
+npx wrangler r2 bucket create kilat-avatars
+
+# Or use the scaffold --remote flag to create it automatically
+npm create kilat@latest my-app --remote
+```
+
+The binding is already in `wrangler.toml`:
+
+```toml
+[[r2_buckets]]
+binding = "AVATARS"
+bucket_name = "kilat-avatars"
+```
+
+Local dev (`wrangler dev --local`) simulates R2 via Miniflare — no bucket
+needed.
