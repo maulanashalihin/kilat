@@ -60,9 +60,9 @@ function inertiaFromContext(
   if (existing) return existing;
   const raw = getCookie(c, SESSION_COOKIE);
   const sessionToken = typeof raw === "string" && raw.length > 0 ? raw : null;
-  // Fallback path: resolveUser/readFlash are async, but this branch is
-  // exotic (inertiaMiddleware didn't run). We pass null user + empty flash
-  // — the real middleware always populates c.var.inertia.
+  // Fallback path: this branch is exotic (inertiaMiddleware didn't run).
+  // We pass null user + empty flash — the real middleware always populates
+  // c.var.inertia via resolveSession.
   return new Inertia(
     {
       request: c.req.raw,

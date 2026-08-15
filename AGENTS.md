@@ -19,39 +19,32 @@ contributions broke the architecture by inventing their own layout.
 - **D1** (SQLite at the edge) — async, zero-ORM. Accessed via `env.DB`
   binding (`prepare().bind().first/all/run`). Schema lives in `migrations/`
   (versioned SQL applied via `wrangler d1 migrations apply`).
-- **Inertia v3 + Svelte 5** — in-process SSR via `svelte/server`; page
-  registry in `src/client/pages.ts` with explicit imports. The SSR bundle
-  is pre-built to `dist/ssr.js` because Wrangler's internal esbuild cannot
-  compile `.svelte` files. `inertia.ts` imports `renderPage` from
-  `../../dist/ssr.js`.
-- **esbuild** — client asset bundler (`scripts/build.ts`). Two esbuild
-  passes with `sveltePlugin`: pass 1 bundles the client (`app.ts`), pass 2
-  bundles the SSR renderer (`ssr.ts` → `dist/ssr.js`). Emits
+- **Inertia v3 + React 19** — in-process SSR; page registry in
+  `src/client/pages.ts` with explicit imports. `renderToString` from
+  `react-dom/server` runs inside the Workers bundle.
+- **esbuild** — client asset bundler (`scripts/build.ts`). Emits
   content-hashed JS + CSS to `dist/`, served via Workers Static Assets
-  binding (`env.ASSETS`). The Tailwind v4 CLI runs as a pre-build step
-  before esbuild.
-- **Tailwind CSS v4 + scoped `<style>`** — `styles.css` holds only global
-  base (tokens, reset, shared UI primitives); `tailwind.css` is the
-  Tailwind entry point with `@import "tailwindcss"`, `@custom-variant dark`,
-  and `@theme inline` bridging CSS vars to Tailwind tokens. Scoped
-  `<style>` blocks in `.svelte` SFCs handle complex component styles
-  alongside Tailwind utilities (see "CSS" below).
+  binding (`env.ASSETS`).
+- **Vanilla CSS, co-located** — no CSS framework. `styles.css` holds only
+  global base (tokens, reset, shared UI primitives); component and page
+  styles live in sibling `.css` files imported by each `.tsx` (see "CSS"
+  below).
 
 ## Layout
 
 ```
 src/
-├── worker.ts               # Cloudflare Workers entry: initConfig, initDb, app.fetch
+├── worker.ts               # Cloudflare Workers entry: initConfig, initDb, initSessionCache, app.fetch
 ├── server/
 │   ├── app.ts              # composition: middleware order, onError, notFound, routes
 │   ├── config.ts           # validated env config via initConfig(env) per-request
 │   ├── db.ts               # D1 async query helpers (initDb pattern, prepare/bind/first/all/run)
-│   ├── auth.ts             # PBKDF2 (Web Crypto), sessions, flash, cookies, guards
+│   ├── auth.ts             # PBKDF2 (Web Crypto), sessions, flash, cookies, guards, optional KV session cache
 │   ├── inertia.ts          # Inertia v3 server adapter (framework-light)
 │   ├── inertia-middleware.ts # per-request session resolve → c.var (AppEnv)
 │   ├── validation.ts       # TypeBox JSON validation → ValidationFailed (422)
 │   ├── mailer.ts           # mail drivers: log / resend / mailtrap
-│   ├── rate-limit.ts       # no-op stub (stateless Workers — use KV/DO for real limiting)
+│   ├── rate-limit.ts       # KV-backed fixed-window rate limiter (fails open without binding)
 │   ├── logger.ts           # per-request console.log + crypto.randomUUID for request ID
 │   ├── security.ts         # CSRF origin check (headers via hono/secure-headers)
 │   ├── url.ts              # defensive request-URL parsing
@@ -61,21 +54,12 @@ src/
 │       ├── google-oauth.routes.ts # /auth/google, /auth/google/callback
 │       ├── pages.routes.ts        # app-shell pages: /, /dashboard, /admin
 │       └── profile.routes.ts      # /profile page + /profile/avatar
-├── client/                 # Svelte 5 + Inertia (pages/, components/, styles.css = global base only)
-│   ├── app.ts              # Inertia client bootstrap (mount/hydrate)
-│   ├── ssr.ts              # in-process SSR renderer (svelte/server) — pre-built to dist/ssr.js
-│   ├── pages.ts            # explicit page registry (shared by SSR + bundle)
-│   ├── pages/              # Login, Register, Dashboard, ForgotPassword,
-│   │                       # ResetPassword, Admin, NotFound, Profile (.svelte)
-│   ├── components/         # Layout, AuthLayout, Brand, Field (.svelte)
-│   ├── styles.css          # global base: tokens, reset, shared UI primitives
-│   └── tailwind.css        # Tailwind v4 entry: @import, @theme inline, dark variant
+├── client/                 # React + Inertia (pages/, components/, styles.css = global base only)
 ├── shared/                 # types.ts, inertia.d.ts (client+server shared)
 ├── migrations/             # versioned SQL schema files (0001, 0002, …)
 └── tests/                  # bun:test E2E suite
 scripts/
-├── build.ts                # Tailwind CLI pre-step + esbuild: client bundle + SSR bundle (dist/ssr.js)
-├── svelte-plugin.ts        # esbuild plugin: compiles .svelte SFCs (client + server modes)
+├── build.ts                # esbuild: bundle client → dist/assets/app-[hash].js + CSS + manifest.json
 └── seed.ts                 # wrangler d1 execute kilat --local + hashPassword
 wrangler.toml               # Workers config: D1 binding, ASSETS binding, nodejs_compat, env vars
 dist/                       # build output (gitignored), served by Workers Static Assets
@@ -115,26 +99,25 @@ dist/                       # build output (gitignored), served by Workers Stati
 
 6. **TypeScript**: `strict` + `noUncheckedIndexedAccess` +
    `verbatimModuleSyntax` are on. Type-only imports MUST use `import type`.
-   No ORM, no loose `any`; queries are parameterized. Type-checking uses
-   `svelte-check` (not `tsc`) so `.svelte` SFCs are covered.
+   No ORM, no loose `any`; queries are parameterized.
 
-7. **Tailwind CSS v4 is the primary styling approach.** `tailwind.css` is
-   the Tailwind entry point: `@import "tailwindcss"`, `@custom-variant dark`
-   for dark mode, `@theme inline` bridging CSS vars to Tailwind tokens so
-   dark mode auto-switches at runtime. `styles.css` holds only global base:
-   design tokens, reset, `:focus-visible`, and shared UI primitives. Scoped
-   `<style>` blocks in `.svelte` SFCs are used for complex component styles
-   alongside Tailwind utilities. The Tailwind CLI runs as a pre-build step,
-   producing `.tailwind.css` which is imported by `app.ts`. Never add
-   page-specific or component-specific rules to `styles.css`.
+7. **CSS is co-located, not centralised.** `styles.css` holds only global
+   base: design tokens (`:root`, `[data-theme]`), reset (`*`, `body`, `h1`…),
+   `:focus-visible`, and shared UI primitives used across multiple pages
+   (`.btn`, `.badge`, `.panel`, `.table`, `.avatar`). Everything else lives
+   in a sibling `.css` file imported by the component or page that uses it
+   (`Brand.css`, `Layout.css`, `Dashboard.css`, …). Never add page-specific
+   or component-specific rules to `styles.css` — it stays small and global.
+   esbuild bundles all imported `.css` files into one stylesheet via the
+   import graph (`app.tsx` → `pages.ts` → page → component → `.css`).
 
 8. **UI work follows the design system — never invents a parallel one.**
-   Reuse Tailwind tokens (bridged from CSS vars in `tailwind.css`) and
-   existing components; don't reach for AI-default aesthetics (beige, ghost
-   cards, purple gradients, italic serif accents). New components add
-   scoped `<style>` blocks per rule 7. Forms use `useForm` + `<form>` from
-   `@inertiajs/svelte` — see `.llm-wiki/wiki/concepts/concept-inertia-form-patterns.md`
-   for the decision rule and examples.
+   Reuse tokens from `styles.css` and existing components; don't reach for
+   AI-default aesthetics (beige, ghost cards, purple gradients, italic
+   serif accents). New components add co-located styles per rule 7. Forms use
+   `useForm` + `<form>` from `@inertiajs/react` — see
+   `.llm-wiki/wiki/concepts/concept-inertia-form-patterns.md` for the
+   decision rule and examples.
 
 ## Route conventions
 
@@ -154,10 +137,11 @@ dist/                       # build output (gitignored), served by Workers Stati
 - **All DB calls are async.** D1 is async — `await env.DB.prepare(sql).bind(...).first()`.
   This cascades to all route handlers, auth functions, and middleware. Never
   use sync DB patterns.
-- **`initConfig(env)` + `initDb(env.DB)` run per-request** in the fetch
-  handler (`src/worker.ts`). They mutate module-level singletons — cheap
-  pointer assignments. Do not cache state across requests; Workers
-  isolates are stateless.
+- **`initConfig(env)` + `initDb(env.DB)` + `initSessionCache(env.SESSION_KV)`
+  run per-request** in the fetch handler (`src/worker.ts`). They mutate
+  module-level singletons — cheap pointer assignments. Do not cache state
+  across requests; Workers isolates are stateless. `initSessionCache` is
+  a no-op when `SESSION_KV` is absent (tests, local dev without the binding).
 - **`Response.redirect()` returns immutable headers on Workers.** Hono's
   `secureHeaders` middleware crashes trying to append security headers to a
   frozen Response. Use `new Response(null, { status, headers: { location } })`
@@ -183,15 +167,6 @@ dist/                       # build output (gitignored), served by Workers Stati
   not a custom handler. `run_worker_first = ["/*", "!/assets/*"]` in
   `wrangler.toml` means all requests hit the Worker first except `/assets/*`
   which bypass to the static asset binding directly.
-- **SSR bundle is pre-built to `dist/ssr.js`.** Wrangler's internal esbuild
-  cannot compile `.svelte` files, so `scripts/build.ts` runs a second
-  esbuild pass with `sveltePlugin("server")` to produce `dist/ssr.js`.
-  `inertia.ts` imports `renderPage` from `../../dist/ssr.js` — run
-  `bun run build` before `wrangler dev` or the import will fail.
-- **Tailwind CLI runs as a pre-build step.** `scripts/build.ts` invokes
-  `bunx @tailwindcss/cli` to compile `tailwind.css` → `.tailwind.css` before
-  the esbuild passes. The generated file is imported by `app.ts` and is
-  gitignored — never edit it by hand.
 
 ## Testing
 
@@ -200,9 +175,8 @@ dist/                       # build output (gitignored), served by Workers Stati
   env in `beforeAll` and calls cleanup in `afterAll` as if process-
   isolated. Without `--isolate`, one file's teardown finalizes the next
   file's cached values.
-- Suite must stay green: run `bun run typecheck` (`svelte-check`) and
-  `bun run test` before finishing. `svelte-check` covers `src/` and
-  `scripts/`, including `.svelte` SFCs.
+- Suite must stay green: run `bun run typecheck` and
+  `bun run test` before finishing. `tsc` only covers `src/` and `scripts/`.
 - Tests use `bun:test` against the Hono app directly (not the Workers
   runtime). D1 calls need mocking or a local D1 instance via Miniflare.
 
@@ -210,7 +184,7 @@ dist/                       # build output (gitignored), served by Workers Stati
 
 - When testing in the browser, ALWAYS open the browser console (DevTools →
   Console) and check for errors/warnings. Client-side runtime errors
-  (failed imports, Svelte runtime errors, hydration mismatches, bad Inertia
+  (failed imports, React runtime errors, hydration mismatches, bad Inertia
   props, network 4xx/5xx on XHR) do NOT show up in `bun run typecheck` or
   the build — the build compiles, the page renders, and the bug is silent
   until you read the console. A green build + green tests does NOT mean the

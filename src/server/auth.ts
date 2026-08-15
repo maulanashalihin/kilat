@@ -11,7 +11,7 @@
  */
 import type { Context, Next } from "hono";
 import { generateCookie } from "hono/cookie";
-import type { FlashData, Role } from "../shared/types";
+import type { FlashData, Role, User } from "../shared/types";
 import {
   deleteOtherSessions,
   deletePasswordResetsByEmail,
@@ -27,10 +27,27 @@ import {
   findEmailVerification,
   insertEmailVerification,
   verifyUserEmail,
+  toPublicUser,
   type UserRow,
 } from "./db";
 import { config } from "./config";
 import type { AppEnv } from "./inertia-middleware";
+
+// ---------------------------------------------------------------------------
+// KV session cache (optional — set SESSION_CACHE_ENABLED=true + SESSION_KV binding)
+// ---------------------------------------------------------------------------
+
+/** Module-level KV namespace for session caching. Set per-request by
+ *  `initSessionCache(env.SESSION_KV)` in the fetch handler. Null when the
+ *  binding is absent (tests, local dev without the namespace) or when
+ *  `config.sessionCache.enabled` is false. */
+let sessionKv: KVNamespace | null = null;
+
+/** Set the KV binding for the current request. Called in the fetch handler
+ *  alongside `initConfig` / `initDb`. Pass `undefined` when no binding exists. */
+export function initSessionCache(kv: KVNamespace | undefined): void {
+  sessionKv = kv ?? null;
+}
 
 export const SESSION_COOKIE = "session";
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
@@ -129,6 +146,14 @@ export interface SessionInfo {
   expiresAt: Date;
 }
 
+/** Result of resolving a session token: the public user + one-shot flash.
+ *  Used by the Inertia middleware to populate `c.var.user` and `c.var.flash`
+ *  in a single call (replaces the separate `resolveUser` + `readFlash` pair). */
+export interface ResolvedSession {
+  user: User;
+  flash: FlashData;
+}
+
 /** 256-bit random token; it is never logged and only lives in the cookie.
  *  The DB stores only its SHA-256 hash so a DB leak cannot expose valid tokens. */
 export async function createSession(userId: number): Promise<SessionInfo> {
@@ -152,13 +177,125 @@ export async function resolveUser(
   return (await findUserById(session.userId)) ?? null;
 }
 
-/** Delete a session by its raw (cookie) token — hashes before hitting the DB. */
-export async function deleteSessionByToken(token: string): Promise<void> {
-  await deleteSession(await hashToken(token));
+// --- KV cache helpers (internal) -------------------------------------------
+
+interface CachedSession {
+  user: User;
+  flash: FlashData;
+  expiresAt: string;
 }
 
+const cacheKey = (hashedToken: string) => `session:${hashedToken}`;
+
+/** Read a cached session from KV. Returns null on miss, disabled, or error. */
+async function getCachedSession(
+  hashedToken: string,
+): Promise<CachedSession | null> {
+  if (!sessionKv || !config.sessionCache.enabled) return null;
+  try {
+    const raw = await sessionKv.get(cacheKey(hashedToken));
+    if (!raw) return null;
+    return JSON.parse(raw) as CachedSession;
+  } catch {
+    return null;
+  }
+}
+
+/** Write a session entry to KV with the configured TTL. Best-effort. */
+async function setCachedSession(
+  hashedToken: string,
+  data: CachedSession,
+): Promise<void> {
+  if (!sessionKv || !config.sessionCache.enabled) return;
+  try {
+    await sessionKv.put(cacheKey(hashedToken), JSON.stringify(data), {
+      expirationTtl: config.sessionCache.ttlSeconds,
+    });
+  } catch {
+    // Cache write failure is non-fatal — next request falls back to D1.
+  }
+}
+
+/** Delete a cached session from KV. Best-effort. */
+async function deleteCachedSession(hashedToken: string): Promise<void> {
+  if (!sessionKv || !config.sessionCache.enabled) return;
+  try {
+    await sessionKv.delete(cacheKey(hashedToken));
+  } catch {
+    // Ignore — stale entry expires via TTL.
+  }
+}
+
+// --- Combined session resolve (user + flash, KV-cached) --------------------
+
+/** Resolve a session token to the public user + flash data.
+ *
+ *  Combines `resolveUser` + `readFlash` into a single D1 `findSession` +
+ *  `findUserById` pair (was 3 queries: findSession + findUserById + findSession
+ *  again for flash). When KV session caching is enabled (`SESSION_CACHE_ENABLED`
+ *  + `SESSION_KV` binding), a cache hit returns both user and flash with **zero
+ *  D1 queries**.
+ *
+ *  Security: D1 remains the source of truth. KV is a cache — on logout the KV
+ *  entry is deleted alongside the D1 row. `deleteOtherSessionsByToken` cannot
+ *  enumerate other sessions' KV keys, so revoked sessions on other devices may
+ *  remain cache-valid for up to `SESSION_CACHE_TTL_SECONDS` (default 300s).
+ *  Reduce the TTL or disable the cache if that window is unacceptable. */
+export async function resolveSession(
+  token: string | null | undefined,
+): Promise<ResolvedSession | null> {
+  if (!token) return null;
+  const hashed = await hashToken(token);
+
+  // 1. Try KV cache (0 D1 queries on hit).
+  const cached = await getCachedSession(hashed);
+  if (cached) {
+    if (Date.now() > new Date(cached.expiresAt).getTime()) {
+      await deleteCachedSession(hashed);
+      return null;
+    }
+    return { user: cached.user, flash: cached.flash };
+  }
+
+  // 2. Cache miss — full D1 lookup (findSession + findUserById).
+  const session = await findSession(hashed);
+  if (!session) return null;
+  if (Date.now() > new Date(session.expiresAt).getTime()) {
+    await deleteSession(hashed); // lazy cleanup of expired sessions
+    return null;
+  }
+  const userRow = await findUserById(session.userId);
+  if (!userRow) return null;
+
+  let flash: FlashData = {};
+  try {
+    flash = (JSON.parse(session.flash) as FlashData) ?? {};
+  } catch {
+    flash = {};
+  }
+
+  const user = toPublicUser(userRow);
+  await setCachedSession(hashed, {
+    user,
+    flash,
+    expiresAt: session.expiresAt,
+  });
+
+  return { user, flash };
+}
+
+/** Delete a session by its raw (cookie) token — hashes before hitting the DB. */
+export async function deleteSessionByToken(token: string): Promise<void> {
+  const hashed = await hashToken(token);
+  await deleteSession(hashed);
+  await deleteCachedSession(hashed);
+}
 /** Delete every session for `userId` except the one owning `token` (password
- *  changes invalidate other devices; the current session stays signed in). */
+ *  changes invalidate other devices; the current session stays signed in).
+ *
+ *  KV cache limitation: other sessions' KV entries cannot be enumerated and
+ *  will expire naturally within `SESSION_CACHE_TTL_SECONDS` (default 300s).
+ *  Reduce the TTL if this revocation window is unacceptable. */
 export async function deleteOtherSessionsByToken(
   token: string,
   userId: number,
@@ -188,13 +325,20 @@ export async function setFlash(
   token: string,
   flash: FlashData,
 ): Promise<void> {
-  await updateSessionFlash(JSON.stringify(flash), await hashToken(token));
+  const hashed = await hashToken(token);
+  await updateSessionFlash(JSON.stringify(flash), hashed);
+  // Invalidate KV cache — flash is one-shot, the cached copy is now stale.
+  await deleteCachedSession(hashed);
 }
 
 export async function clearFlash(
   token: string | null | undefined,
 ): Promise<void> {
-  if (token) await updateSessionFlash("{}", await hashToken(token));
+  if (!token) return;
+  const hashed = await hashToken(token);
+  await updateSessionFlash("{}", hashed);
+  // Invalidate KV cache — flash was consumed, cached copy is stale.
+  await deleteCachedSession(hashed);
 }
 
 // ---------------------------------------------------------------------------
