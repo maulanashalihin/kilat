@@ -29,6 +29,20 @@ id = "YOUR_KV_NAMESPACE_ID"
 # RATE_LIMIT_AUTH_MAX = "30"
 # RATE_LIMIT_AUTH_WINDOW = "60"
 
+# --- Session cache (KV-backed, optional — for high-traffic deployments) -----
+# Off by default. Enable when D1's single-threaded ~1K QPS limit becomes a
+# bottleneck (thousands of RPS). Requires a SESSION_KV KV namespace binding.
+# Create the namespace:
+#   npx wrangler kv namespace create SESSION_KV
+# Local dev (wrangler dev --local) works with any placeholder id — Miniflare
+# simulates the namespace. Without the binding, session resolution falls back
+# to D1-only (no error).
+# SESSION_CACHE_ENABLED = "true"
+# SESSION_CACHE_TTL_SECONDS = "300"
+[[kv_namespaces]]
+binding = "SESSION_KV"
+id = "YOUR_SESSION_KV_NAMESPACE_ID"
+
 [[d1_databases]]
 binding = "DB"
 database_id = "YOUR_D1_DATABASE_ID"
@@ -59,6 +73,7 @@ run_worker_first = ["/*", "!/assets/*"]
 #   npx wrangler kv namespace create RATE_LIMIT_KV --env production
 #   npx wrangler d1 create kilat-production
 #   npx wrangler r2 bucket create kilat-avatars-production
+#   npx wrangler kv namespace create SESSION_KV --env production
 
 [env.staging]
 name = "kilat-staging"
@@ -77,9 +92,14 @@ head_sampling_rate = 1
 #   npx wrangler kv namespace create RATE_LIMIT_KV --env staging
 #   npx wrangler d1 create kilat-staging
 #   npx wrangler r2 bucket create kilat-avatars-staging
+#   npx wrangler kv namespace create SESSION_KV --env staging
 [[env.staging.kv_namespaces]]
 binding = "RATE_LIMIT_KV"
 id = "YOUR_STAGING_KV_ID"
+
+[[env.staging.kv_namespaces]]
+binding = "SESSION_KV"
+id = "YOUR_STAGING_SESSION_KV_ID"
 
 [[env.staging.d1_databases]]
 binding = "DB"
@@ -107,6 +127,10 @@ head_sampling_rate = 0.1
 [[env.production.kv_namespaces]]
 binding = "RATE_LIMIT_KV"
 id = "YOUR_PRODUCTION_KV_ID"
+
+[[env.production.kv_namespaces]]
+binding = "SESSION_KV"
+id = "YOUR_PRODUCTION_SESSION_KV_ID"
 
 [[env.production.d1_databases]]
 binding = "DB"

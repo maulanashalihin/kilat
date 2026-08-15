@@ -6,24 +6,23 @@ The Indonesian word for *lightning* — a full-stack edge starter that runs at t
 [![Cloudflare Workers](https://img.shields.io/badge/runtime-Cloudflare_Workers-F38020?logo=cloudflare&logoColor=white)](https://workers.cloudflare.com/)
 [![Hono](https://img.shields.io/badge/Hono-4.x-FF6B35?logo=hono&logoColor=white)](https://hono.dev/)
 [![D1](https://img.shields.io/badge/D1-SQLite_at_the_edge-059669)](https://developers.cloudflare.com/d1/)
-[![Tailwind CSS](https://img.shields.io/badge/Tailwind_CSS-v4-06B6D4?logo=tailwindcss&logoColor=white)](https://tailwindcss.com/)
 
 A full-stack starter running entirely on **Cloudflare Workers**: **Hono** for
 HTTP, **D1** for data, **Inertia v3** for server-driven UI with **in-process
 SSR** — React 19 `renderToString` runs inside the Worker bundle — with auth,
-roles, migrations, and zero-config deploys. Styling uses **Tailwind CSS v4**.
-No Docker, no VPS, no reverse proxy. `wrangler deploy` and you're live on
-300+ edge locations.
+roles, migrations, and zero-config deploys. No Docker, no VPS, no reverse
+proxy. `wrangler deploy` and you're live on 300+ edge locations.
 
 ```mermaid
 flowchart LR
   Browser -->|Inertia XHR / full HTML| Worker
   subgraph Cloudflare Workers
-    Worker -->|initConfig, initDb| Config
+    Worker -->|initConfig, initDb, initSessionCache| Config
     Worker -->|session, flash| Auth
+    Auth -->|cache miss| D1[(D1)]
+    Auth -.->|cache hit| KV[(SESSION_KV)]
     Worker -->|page payloads| InertiaAdapter
     InertiaAdapter -->|renderToString| ReactSSR
-    Worker -->|SQL| D1[(D1)]
   end
   ReactSSR --> Browser
   Google -->|OAuth callback| Worker
@@ -60,8 +59,8 @@ of breaking it.
   it must be upgraded, audited, and can break under you. When 60 lines of
   our own code are enough, we write them: the rate limiter is a no-op stub
   (real limiting needs KV/DO — add when you need it), the Google OAuth
-  client is plain `fetch` (no SDK), and the database layer is raw D1
-  prepared statements — no ORM.
+  client is plain `fetch` (no SDK), CSS is vanilla by default, and the
+  database layer is raw D1 prepared statements — no ORM.
 
 - **One obvious way to do things.** Structure is standardized, on purpose:
   routes only live in `routes/<feature>.routes.ts`, all SQL lives in
@@ -129,7 +128,7 @@ bun run dev           # http://localhost:8787
 | Template            | Stack                              | Branch                    |
 | ------------------- | ---------------------------------- | ------------------------- |
 | `default`           | React 19 + vanilla CSS             | `main`                    |
-| **`react-tailwind`**    | **React 19 + Tailwind CSS v4**         | **`template/react-tailwind`** |
+| `react-tailwind`    | React 19 + Tailwind CSS v4         | `template/react-tailwind` |
 | `svelte-vanilla`    | Svelte 5 + scoped `<style>` CSS    | `template/svelte-vanilla` |
 | `svelte-tailwind`   | Svelte 5 + Tailwind CSS v4         | `template/svelte-tailwind`|
 | `vue-vanilla`       | Vue 3 + scoped `<style>` CSS       | `template/vue-vanilla`    |
@@ -176,7 +175,7 @@ bun run deploy       # https://<your-worker>.<your-subdomain>.workers.dev
 | Command             | What it does                                              |
 | ------------------- | --------------------------------------------------------- |
 | `bun run dev`       | Wrangler dev server (local D1 + Workers runtime)          |
-| `bun run build`     | esbuild client assets + Tailwind v4 CLI → `dist/` (+ `manifest.json`)       |
+| `bun run build`     | esbuild client assets → `dist/` (+ `manifest.json`)       |
 | `bun run deploy`    | `wrangler deploy` to Cloudflare Workers edge              |
 | `bun run db:migrate`     | Apply D1 migrations locally                          |
 | `bun run db:migrate:remote` | Apply D1 migrations to remote (production)        |
@@ -188,8 +187,8 @@ bun run deploy       # https://<your-worker>.<your-subdomain>.workers.dev
 
 - **Auth**: register, login, logout — PBKDF2 passwords (Web Crypto, 100K
   iterations — Workers caps at 100K), DB-backed sessions (httpOnly
-  `SameSite=Lax` cookies, 30-day expiry, `Secure` in production), CSRF
-  (Origin check).
+  `SameSite=Lax` cookies, 30-day expiry, `Secure` in production), optional
+  KV session cache for high-traffic deployments, CSRF (Origin check).
 - **Forgot / reset password** with email delivery (see Mail below) and
   hashed reset tokens (60-minute expiry).
 - **Google OAuth** register-or-login (zero-dep, plain fetch; button hidden
@@ -223,6 +222,8 @@ values (API keys, OAuth secrets) should use `wrangler secret put` instead.
 | `RATE_LIMIT_GLOBAL_WINDOW` | `60` | global window in seconds |
 | `RATE_LIMIT_AUTH_MAX` | `30` | auth requests per window (`/login`, `/register`, password reset) |
 | `RATE_LIMIT_AUTH_WINDOW` | `60` | auth window in seconds |
+| `SESSION_CACHE_ENABLED` | `false` | `true` enables KV-backed session caching (requires `SESSION_KV` binding — see [Session caching](#session-caching)) |
+| `SESSION_CACHE_TTL_SECONDS` | `300` | KV session cache TTL in seconds (lower = faster revocation, more D1 misses) |
 
 Invalid/incomplete config fails fast with a clear message
 (`src/server/config.ts`).
@@ -243,6 +244,45 @@ Invalid/incomplete config fails fast with a clear message
 - **resend**: set `RESEND_API_KEY` (`MAIL_DRIVER=resend`).
 - **mailtrap**: set `MAILTRAP_API_TOKEN` (`MAIL_DRIVER=mailtrap`); add
   `MAILTRAP_INBOX_ID` to use the sandbox endpoint.
+
+### Session caching
+
+By default, every request resolves the session from D1 (2 queries:
+`findSession` + `findUserById`). This is correct and simple, but D1 is
+single-threaded per database — throughput caps at ~1,000 QPS for sub-millisecond
+queries. At thousands of RPS, session lookups become the bottleneck.
+
+Enable KV-backed session caching to eliminate D1 queries on cache hits:
+
+1. Create a KV namespace: `npx wrangler kv namespace create SESSION_KV`
+   (paste the id into `wrangler.toml` under `[[kv_namespaces]]`).
+2. Set `SESSION_CACHE_ENABLED = "true"` in `wrangler.toml` `[vars]`.
+3. Deploy.
+
+**How it works**: on a cache miss, the session is read from D1 and written
+to KV with a TTL (`SESSION_CACHE_TTL_SECONDS`, default 300s). Subsequent
+requests for the same session token hit KV (globally distributed, ~10ms)
+and skip D1 entirely. Logout and flash consumption invalidate the KV entry.
+D1 remains the source of truth — a KV miss always falls back to D1.
+
+**Security trade-off**: `deleteOtherSessionsByToken` (password change) cannot
+enumerate other sessions' KV keys, so revoked sessions on other devices may
+remain cache-valid for up to `SESSION_CACHE_TTL_SECONDS`. Reduce the TTL or
+disable the cache if this window is unacceptable.
+
+### D1 read replication
+
+D1 automatically deploys read-only replicas to all supported regions (no
+extra cost). Reads are served from the nearest replica, reducing latency
+globally. Enable it in the Cloudflare dashboard:
+
+**Workers & Pages → your D1 database → Settings → Read Replication → Enable**.
+
+Read replication is already active for databases created after the beta
+(April 2025). Reads may be served by replicas with slight replication lag;
+the D1 Sessions API ensures sequential consistency for read-after-write
+paths (e.g., session lookup immediately after login). Writes always go to
+the single primary.
 
 ## Architecture
 
@@ -278,15 +318,14 @@ src/
 │   ├── pages/              # Login, Register, Dashboard, ForgotPassword,
 │   │                       # ResetPassword, Admin, NotFound, Profile
 │   ├── components/         # Layout, AuthLayout, Brand, Field
-│   ├── styles.css          # global base tokens, bridged to Tailwind via @theme inline
-│   └── tailwind.css        # Tailwind v4 entry: @import, @theme inline, dark variant
+│   └── styles.css          # plain CSS, light/dark
 ├── shared/
 │   ├── types.ts            # User, Role, FlashData, SharedPageProps, Paginated
 │   └── inertia.d.ts        # InertiaConfig augmentation → typed props.auth
 ├── migrations/             # versioned SQL schema files (0001, 0002, …)
 └── tests/                  # bun:test E2E suite
 scripts/
-├── build.ts                # Tailwind CLI pre-step + esbuild: bundle client → dist/assets/app-[hash].js + CSS
+├── build.ts                # esbuild: bundle client → dist/assets/app-[hash].js + CSS
 └── seed.ts                 # wrangler d1 execute kilat --local + hashPassword
 wrangler.toml               # Workers config: D1 binding, ASSETS binding, nodejs_compat, env vars
 dist/                       # build output (gitignored), served by Workers Static Assets
@@ -295,15 +334,18 @@ dist/                       # build output (gitignored), served by Workers Stati
 ## How the pieces fit
 
 - **Request lifecycle**: `worker.ts` fetch handler → `initConfig(env)` +
-  `initDb(env.DB)` → `app.fetch(request, env)` → `requestLogger` (correlation
-  id) → `checkOrigin` (CSRF) → `secureHeaders` → inertia session resolve →
-  guards + handler → Inertia render (SSR HTML for browsers, JSON for
-  `X-Inertia` XHR) → `onError` (422 validation, 500) / `notFound` (404).
+  `initDb(env.DB)` + `initSessionCache(env.SESSION_KV)` → `app.fetch` →
+  `requestLogger` (correlation id) → `checkOrigin` (CSRF) → `secureHeaders`
+  → inertia session resolve (`resolveSession`: user + flash in one call,
+  KV-cached when enabled) → guards + handler → Inertia render (SSR HTML for
+  browsers, JSON for `X-Inertia` XHR) → `onError` (422, 500) / `notFound` (404).
 - **Auth**: PBKDF2 via `crypto.subtle` (100K iterations — Workers caps at
   100K, OWASP-acceptable for PBKDF2-HMAC-SHA256); 256-bit random session
-  tokens in D1; cookies httpOnly/`SameSite=Lax`/Secure-in-prod. Logout
-  deletes the session row server-side. `passwordHash` never leaves the
-  server.
+  tokens in D1 (SHA-256 hashed at rest); cookies httpOnly/`SameSite=Lax`/
+  Secure-in-prod. Optional KV session cache for high-traffic deployments
+  (see [Session caching](#session-caching)). Logout deletes the session row
+  server-side + invalidates the KV cache entry. `passwordHash` never leaves
+  the server.
 - **Guards** are Hono middleware: `requireAuth`, `guestOnly`,
   `requireRole('admin')` (non-admins redirect to `/dashboard`). They return
   a Response to short-circuit the chain, or call `next()`.
@@ -317,8 +359,7 @@ dist/                       # build output (gitignored), served by Workers Stati
 - **Asset versioning**: esbuild emits content-hashed files; the hash is
   the Inertia `version`. Stale clients get a 409 and reload. Run
   `bun run build` before `wrangler dev` or `wrangler deploy` when assets
-  change. The Tailwind v4 CLI runs as a pre-build step, emitting
-  `src/client/.tailwind.css` before esbuild bundles the client.
+  change.
 - **Static assets**: served via Workers Static Assets binding (`env.ASSETS`).
   `run_worker_first = ["/*", "!/assets/*"]` in `wrangler.toml` means
   `/assets/*` bypasses the Worker and is served directly from the static
@@ -401,20 +442,7 @@ read-only copies to the nearest edge automatically.
 
 ## Styling
 
-This template uses **Tailwind CSS v4** (`react-tailwind`):
-
-- `tailwind.css` is the Tailwind entry point: `@import "tailwindcss"`,
-  `@custom-variant dark`, and `@theme inline` bridging CSS vars to
-  Tailwind tokens so dark mode auto-switches at runtime.
-- `styles.css` still holds global base tokens (CSS variables, reset,
-  shared UI primitives); co-located `.css` files are used for
-  component-specific styles alongside Tailwind utilities.
-- The Tailwind v4 CLI runs as a pre-build step in `scripts/build.ts`
-  (`bunx @tailwindcss/cli`), producing `src/client/.tailwind.css` before
-  esbuild bundles the client.
-
-Kilat ships **six template variants** in total — pick one via the
-scaffolder:
+Kilat ships **six template variants** — pick one via the scaffolder:
 
 - **Vanilla CSS** (`default`, `svelte-vanilla`, `vue-vanilla`): design tokens
   via CSS variables, light/dark via `[data-theme]`, co-located `<style>` or
@@ -437,15 +465,18 @@ scaffolder:
 - **No custom compression**: Wrangler/Miniflare auto-compresses responses
   with gzip/br natively. A custom compress middleware causes
   double-compression.
-- **Rate limiting is a no-op stub**: Workers isolates are stateless — an
-  in-memory `Map` doesn't persist across requests. Use KV or Durable
-  Objects for real per-IP limiting when you need it.
+- **Rate limiting is KV-backed**: Workers isolates are stateless — an
+  in-memory `Map` doesn't persist across requests. The rate limiter uses
+  the `RATE_LIMIT_KV` binding (fails open without it).
+- **Session caching is optional**: D1 is single-threaded (~1K QPS for
+  sub-ms queries). For high-traffic deployments, enable `SESSION_CACHE_ENABLED`
+  with a `SESSION_KV` binding to cache session lookups. D1 remains the source
+  of truth; KV is a cache with explicit invalidation on logout/flash consume.
+  `deleteOtherSessionsByToken` cannot enumerate other sessions' KV keys —
+  revoked sessions on other devices expire via TTL (default 300s).
 - **CSP uses `script-src 'unsafe-inline'`** because Inertia embeds the page
   payload as inline JSON; external script injection is still blocked.
 - **`import.meta.glob` was removed from Bun 1.3** — the page registry uses
   explicit imports.
 - **Run `bun run build` before `wrangler dev`** if assets have changed —
   the Worker imports `dist/manifest.json` at module load.
-- **Tailwind v4 CLI runs as a pre-build step** (`bunx @tailwindcss/cli`)
-  producing `src/client/.tailwind.css` before esbuild bundles — run
-  `bun run build` when styles change.

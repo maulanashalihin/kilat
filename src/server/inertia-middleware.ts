@@ -16,8 +16,7 @@ import type { Next } from "hono";
 import type { Context } from "hono";
 import { getCookie } from "hono/cookie";
 import type { FlashData, User } from "../shared/types";
-import { readFlash, resolveUser, SESSION_COOKIE } from "./auth";
-import { toPublicUser } from "./db";
+import { resolveSession, SESSION_COOKIE } from "./auth";
 import { Inertia, type InertiaAssets } from "./inertia";
 
 /** Context variables shared by every route/middleware. */
@@ -29,6 +28,9 @@ export interface AppEnv {
     /** R2 bucket for avatar storage (see wrangler.toml). Optional at the
      *  type level so tests/local runs without the binding skip R2 features. */
     AVATARS?: R2Bucket;
+    /** KV namespace for session caching (see wrangler.toml). Optional —
+     *  only used when SESSION_CACHE_ENABLED=true. */
+    SESSION_KV?: KVNamespace;
   };
   Variables: {
     user: User | null;
@@ -51,9 +53,9 @@ export const inertiaMiddleware =
   (assets: InertiaAssets) => async (c: Context<AppEnv>, next: Next) => {
     const raw = getCookie(c, SESSION_COOKIE);
     const sessionToken = typeof raw === "string" && raw.length > 0 ? raw : null;
-    const row = await resolveUser(sessionToken);
-    const user = row ? toPublicUser(row) : null;
-    const flash = await readFlash(sessionToken);
+    const resolved = await resolveSession(sessionToken);
+    const user = resolved ? resolved.user : null;
+    const flash = resolved ? resolved.flash : {};
     const cspNonce = generateNonce();
     c.set("user", user);
     c.set("flash", flash);
