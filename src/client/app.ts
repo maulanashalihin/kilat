@@ -10,10 +10,18 @@ import { createApp, createSSRApp, h } from "vue";
 import "./styles.css"; // global base: tokens, reset, shared UI primitives
 import { notFoundPage, pages } from "./pages";
 
+/** Read the CSP nonce from the <meta name="csp-nonce"> tag set by the server.
+ *  Used by Inertia for inline styles (progress bar, error modal) so they
+ *  pass a strict CSP without 'unsafe-inline'. */
+const cspNonce =
+	document.querySelector('meta[name="csp-nonce"]')?.getAttribute("content") ??
+	undefined;
+
 createInertiaApp({
 	id: "app",
 	resolve: (name) =>
 		(pages[`./pages/${name}.vue`]?.default ?? notFoundPage) as DefineComponent,
+	nonce: cspNonce,
 	setup({ el, App, props, plugin }) {
 		const hydrate = el.hasAttribute("data-server-rendered");
 		const app = (hydrate ? createSSRApp : createApp)({
