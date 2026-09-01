@@ -16,3 +16,4 @@ data/uploads/
 src/client/.tailwind.css
 create-kilat/bun.lock
 src/client/.tailwind.css
+.kilat/
