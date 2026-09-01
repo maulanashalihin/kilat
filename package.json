@@ -25,6 +25,11 @@
   "module": "src/worker.ts",
   "scripts": {
     "dev": "wrangler dev",
+    "dev:background": "bun run scripts/dev.ts background",
+    "dev:status": "bun run scripts/dev.ts status",
+    "dev:stop": "bun run scripts/dev.ts stop",
+    "dev:logs": "bun run scripts/dev.ts logs",
+    "dev:restart": "bun run dev:stop && bun run dev:background",
     "build": "bun run scripts/build.ts",
     "deploy": "wrangler deploy",
     "db:migrate": "wrangler d1 migrations apply kilat --local",
