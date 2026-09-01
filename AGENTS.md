@@ -180,6 +180,31 @@ dist/                       # build output (gitignored), served by Workers Stati
 - Tests use `bun:test` against the Hono app directly (not the Workers
   runtime). D1 calls need mocking or a local D1 instance via Miniflare.
 
+## Dev server
+
+AI agents use the lifecycle manager (`scripts/dev.ts`), not raw `wrangler dev`.
+Human developers use `bun run dev` (foreground) — agents use `dev:background`.
+
+- **Start:** `bun run dev:background` — server jalan detached di background,
+  lock file di `.kilat/dev.json` (PID, port, URL). Output "Server ready"
+  muncul saat server siap — tunggu itu sebelum test. Build client assets
+  otomatis jika `dist/manifest.json` belum ada.
+- **Cek status:** `bun run dev:status` — cek server hidup, port, PID, 3 baris
+  log terakhir.
+- **Cek log:** `bun run dev:logs` (50 baris terakhir) atau
+  `bun run scripts/dev.ts logs --follow` (tail -f style, blocking).
+- **Stop:** `bun run dev:stop` — graceful SIGTERM, fallback SIGKILL, hapus
+  lock file.
+- **Restart manual:** `bun run dev:restart` (stop + background). Wrangler dev
+  TIDAK auto-reload saat file berubah — setelah edit client code, jalankan
+  `bun run build` lalu `bun run dev:restart`. Edit server code juga perlu
+  restart karena wrangler dev tidak watch `src/`.
+- **JANGAN pakai `hub op:start`** — hub-spawned process tidak pick up
+  wrangler dev dengan benar.
+- **Kalau user sudah nyalakan server sendiri:** biarkan. Jangan stop,
+  jangan restart, jangan nyalakan yang kedua. Pakai `bun run dev:status`
+  untuk detect, atau tanya user port-nya.
+
 ## Browser testing
 
 - When testing in the browser, ALWAYS open the browser console (DevTools →
