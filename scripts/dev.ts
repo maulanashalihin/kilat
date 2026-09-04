@@ -127,7 +127,7 @@ async function background(): Promise<void> {
 			const log = readFileSync(LOG_FILE, "utf-8");
 			const match = log.match(/http:\/\/localhost:(\d+)/);
 			if (match) {
-				port = parseInt(match[1], 10);
+				port = parseInt(match[1]!, 10);
 				url = `http://localhost:${port}`;
 				break;
 			}
