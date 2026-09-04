@@ -116,19 +116,16 @@ describe("validateJson", () => {
     expect(res.status).toBe(400);
   });
 
-  it("defaults the body to {} for non-JSON content-type and runs validation", async () => {
+  it("rejects non-JSON content-type with 415", async () => {
     const app = buildApp(userSchema);
-    // form-urlencoded is NOT a JSON content-type, so the middleware skips
-    // c.req.json() and validates the default {} — required fields fail.
+    // form-urlencoded is NOT a JSON content-type — middleware returns 415
+    // instead of silently defaulting to {} and producing misleading 422 errors.
     const res = await app.request("/test", {
       method: "POST",
       body: "name=Ada&email=ada@example.com",
       headers: { "content-type": "application/x-www-form-urlencoded" },
     });
-    expect(res.status).toBe(422);
-    const body = await res.json();
-    const paths = body.errors.map((e: { path: string }) => e.path);
-    expect(paths).toContain("/name");
+    expect(res.status).toBe(415);
   });
 });
 
