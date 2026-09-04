@@ -6,7 +6,7 @@
  * Hono stores the 2nd fetch arg as `c.env` — same pattern as Bun.serve.
  */
 import { createApp } from "./server/app";
-import { initConfig, type EnvVars } from "./server/config";
+import type { EnvVars } from "./server/config";
 import { initDb } from "./server/db";
 import { initSessionCache } from "./server/auth";
 import manifest from "../dist/manifest.json";
