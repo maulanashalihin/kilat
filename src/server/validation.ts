@@ -43,16 +43,19 @@ export const validateJson = <T extends TSchema>(schema: T) =>
 		string,
 		{ in: { json: Static<T> }; out: { json: Static<T> } }
 	>(async (c, next) => {
-		let value: unknown = {};
+		let value: unknown;
 		const contentType = c.req.header("content-type") ?? "";
-		if (JSON_CONTENT_TYPE.test(contentType)) {
-			try {
-				value = await c.req.json();
-			} catch {
-				throw new HTTPException(400, {
-					message: "Malformed JSON in request body",
-				});
-			}
+		if (!JSON_CONTENT_TYPE.test(contentType)) {
+			throw new HTTPException(415, {
+				message: "Content-Type must be application/json",
+			});
+		}
+		try {
+			value = await c.req.json();
+		} catch {
+			throw new HTTPException(400, {
+				message: "Malformed JSON in request body",
+			});
 		}
 		if (Value.Check(schema, value)) {
 			c.req.addValidatedData("json", value as Static<T> as {});
